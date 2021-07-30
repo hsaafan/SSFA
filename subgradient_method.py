@@ -42,7 +42,7 @@ w_j = np.random.rand(m, 1)
 # Hyperparameters
 # min (1/2n)||w_j X_dot||^2_2 + lam_1 ||w_j||_1 + (lam_2 / 2) ||w_j||^2_2
 # gamma is the gradient step size in proximal gradient descent
-# gamma = 2e-5, lam_1 = 10, lam_2 = 1
+# gamma = 2e-5, lam_1 = 0.1, lam_2 = 1
 gamma = 2e-5
 lam_1 = 0.1
 lam_2 = 1
@@ -57,12 +57,18 @@ iter = 0
 error = 1
 
 while error > convergence_tolerance:
-    iter += 1
+    wk = iter / (iter + 3)
+
     w_j_prev = np.copy(w_j)
-    w_j = soft_thresholding(B @ w_j, gamma)
+    y_j = w_j + wk * (w_j - w_j_prev)
+    w_j = soft_thresholding(B @ y_j, gamma)
+
+    iter += 1
     if iter >= max_iter:
         print("Reached max iterations")
         break
+    elif np.isnan(w_j).any():
+        raise ValueError("Reached invalid value in array")
     error = np.linalg.norm(w_j_prev - w_j) / np.linalg.norm(w_j_prev)
 
 w_j = w_j / np.linalg.norm(w_j)
