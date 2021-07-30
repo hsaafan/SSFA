@@ -29,38 +29,30 @@ def soft_thresholding(v: np.ndarray, t: float) -> np.ndarray:
 X, T0, T4, T5, T10 = tep_import.import_tep_sets()
 
 X = X - np.mean(X, axis=1).reshape((-1, 1))
-
-L, lam, LT = np.linalg.svd(np.cov(X))
-inv_lam = np.diag(lam**(-1/2))
-
-Q = L @ inv_lam
-
 X_dot = X[:, 1:] - X[:, :-1]
-Z_dot = Q.T @ X_dot
 
-P, Omega, PT = np.linalg.svd(np.cov(Z_dot))
-W = (Q @ P).T
 
 m = X.shape[0]
-# w_j = W[-1, :]
+n = X.shape[1]
+
 # How this is initialized greatly affects results
 w_j = np.random.rand(m, 1)
 # w_j = np.ones((m, 1))
 
 # Hyperparameters
-# min (1/2)||w_j X_dot||^2_2 + lam_1 ||w_j||_1 + (lam_2 / 2) ||w_j||^2_2
+# min (1/2n)||w_j X_dot||^2_2 + lam_1 ||w_j||_1 + (lam_2 / 2) ||w_j||^2_2
 # gamma is the gradient step size in proximal gradient descent
 # gamma = 2e-5, lam_1 = 10, lam_2 = 1
 gamma = 2e-5
-lam_1 = 10
+lam_1 = 0.1
 lam_2 = 1
 
-A = X_dot @ X_dot.T
+A = (X_dot @ X_dot.T) / n
 B = (1 - (lam_2 / lam_1) * gamma) * np.eye(m) - (gamma / lam_1) * A
 
 # Convergence parameters
-convergence_tolerance = 1e-4
-max_iter = 5000
+convergence_tolerance = 1e-5
+max_iter = 10000
 iter = 0
 error = 1
 
@@ -81,6 +73,14 @@ w_j = w_j.flat
 ssfa_speed = np.linalg.norm(y_j) / y_j.size
 print(f"Zero weights: {m - np.count_nonzero(w_j)}")
 print(f"Speed: {ssfa_speed}")
+
+# Normal SFA for Comparison
+L, lam, LT = np.linalg.svd(np.cov(X))
+inv_lam = np.diag(lam**(-1/2))
+Q = L @ inv_lam
+Z_dot = Q.T @ X_dot
+P, Omega, PT = np.linalg.svd(np.cov(Z_dot))
+W = (Q @ P).T
 
 _f1, ax1 = plt.subplots()
 ax1.plot((W @ X)[-1, :], label=f'Slowest from SFA - Speed = {Omega[-1]}')
