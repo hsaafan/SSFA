@@ -2,11 +2,14 @@ import numpy as np
 import numpy.linalg as npla
 import tep_import
 import matplotlib.pyplot as plt
+
 import warnings
+import math
 
 
-def soft_threshold_vector(x: np.ndarray, eps):
+def soft_threshold_vector(vector, eps):
     # Soft thresholding used as proximal operator of l1 norm
+    x = np.copy(vector)
     for i in range(x.shape[0]):
         if x[i] >= eps:
             x[i] = x[i] - eps
@@ -22,7 +25,6 @@ def fista(A, b, mu, maxit):
     # https://gist.github.com/agramfort/ac52a57dc6551138e89b
     # Changed to use my soft threshold function
     x = np.zeros(A.shape[1])
-    pobj = []
     t = 1
     z = x.copy()
     L = npla.norm(A) ** 2
@@ -33,11 +35,8 @@ def fista(A, b, mu, maxit):
         t0 = t
         t = (1. + np.sqrt(1. + 4. * t ** 2)) / 2.
         z = x + ((t0 - 1.) / t) * (x - xold)
-        this_pobj = 0.5 * npla.norm(A.dot(x) - b) ** 2 + mu * npla.norm(x, 1)
-        pobj.append((0, this_pobj))
 
-    times, pobj = map(np.array, zip(*pobj))
-    return x, pobj, times
+    return(z)
 
 
 def optimize_P(X, Y, P, R, L, inv_lam, mu):
@@ -78,7 +77,8 @@ def optimize_P(X, Y, P, R, L, inv_lam, mu):
     to_p = npla.inv(to_z)
     for col in range(P.shape[1]):
         Y_star = Y @ R[:, col]
-        z_opt, _, _ = fista(X, Y_star, mu, 100)
+        z_opt = fista(X, Y_star, mu, 100)
+        # z_opt = fista_backtracking(Y_star, X, mu)
         # Change of variable back to p
         P[:, col] = to_p @ z_opt
     return(P)
@@ -91,54 +91,50 @@ def optimize_R(Y, P):
     return(R)
 
 
-""" For my implementation of FISTA
-def prox_grad(x, fun, grad_fun, prox_fun, lam, rel_tol=0.01, max_iters=500):
-    # Iteration variables
-    err = 2 * rel_tol
-    k = 0
-    diff = None
+def fista_backtracking(Y_star, X, mu, L=10, eta=1.5,
+                       max_iters=500, tol=1e-3):
+    z = np.zeros(X.shape[1])
+    y = np.copy(z)
+    t_next = 1
 
-    x_prev = np.zeros_like(x)
-    while err > rel_tol:
-        # Iteration update
-        k += 1
-        if k > max_iters:
-            raise RuntimeError(f"Reached {max_iters} iterations")
-        # Tuning parameter update
-        w = k / (k + 3)
-        # Weighting
-        y = x + w * (x - x_prev)
-        # Proximal of gradient
-        x_prev = x.copy()
-        x, lam = line_search(y, lam, fun, prox_fun, grad_fun)
+    def prox(z, L, mu):
+        x = z + (2/L) * X.T @ (Y_star - X @ z)
+        x = soft_threshold_vector(x, mu/L)
+        return(x)
 
-        # Check convergence
-        diff_old = diff
-        diff = np.sum(abs(x - x_prev))
-        if diff_old is None:
-            continue
-        elif diff == 0:
+    def fun(z):
+        return(npla.norm(Y_star - X @ z)**2 + mu * npla.norm(z, ord=1))
+
+    def quad_min(x, y, L):
+        fy = npla.norm(Y_star - X @ y)**2
+        diff = x - y
+        gradfy = 2 * (X.T @ X @ z - X.T @ Y_star)
+        inprod = diff.T @ gradfy
+        l2 = (L/2) * npla.norm(diff) ** 2
+        gx = npla.norm(x, ord=1)
+        return(fy + inprod + l2 + gx)
+
+    z_prev = np.zeros_like(y)
+    for i in range(max_iters):
+        # Backtracking to find Lipschitz constant
+        for eta_pwr in range(max_iters):
+            eta_temp = eta ** eta_pwr
+            prox_y = prox(y, eta_temp * L, mu)
+
+            if fun(prox_y) <= quad_min(prox_y, y, eta_temp*L):
+                L = eta_temp * L
+                break
+
+        z_prev = np.copy(z)
+        z = prox(y, L, mu)
+
+        t_prev = t_next
+        t_next = (1 + math.sqrt(1 + 4 * t_prev ** 2))/2
+
+        y = z + (t_prev - 1)/t_next * (z - z_prev)
+        if i != 0 and npla.norm(z - z_prev) <= tol:
             break
-        err = abs(diff - diff_old) / diff_old
-    return(x)
-
-
-def line_search(y, lam, fun, prox_fun, grad_fun, max_iters=50):
-    beta = 0.5
-    k = 0
-
-    while True:
-        k += 1
-        if k > max_iters:
-            raise RuntimeError(f"Reached {max_iters} iterations")
-        z = prox_fun(y - lam * grad_fun(y))
-        fun_hat = (fun(y) + grad_fun(y) @ (z - y)
-                   + (1 / (2 * lam)) * npla.norm(z - y) ** 2)
-        if fun(z) <= fun_hat:
-            break
-        lam *= beta
-    return(z, lam)
-"""
+    return(z, L)
 
 
 def loss(Y, P, R, L, inv_lam):

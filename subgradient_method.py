@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 import tep_import
@@ -26,11 +27,30 @@ def soft_thresholding(v: np.ndarray, t: float) -> np.ndarray:
     return(v_star)
 
 
-X, T0, T4, T5, T10 = tep_import.import_tep_sets()
+def accelerated_pgd(B, x, gamma=2e-5, max_iter=10000, conv_tol=1e-5):
 
+    iter = 0
+    error = 1
+    while error > conv_tol:
+        wk = iter / (iter + 3)  # Acceleration parameter
+
+        x_prev = np.copy(x)
+        y = x + wk * (x - x_prev)
+        x = soft_thresholding(B @ y, gamma)
+
+        iter += 1
+        if iter >= max_iter:
+            print("Reached max iterations")
+            break
+        elif np.isnan(x).any():
+            raise ValueError("Reached invalid value in array")
+        error = np.linalg.norm(x - x_prev) / np.linalg.norm(x_prev)
+    return(x)
+
+
+X, T0, T4, T5, T10 = tep_import.import_tep_sets()
 X = X - np.mean(X, axis=1).reshape((-1, 1))
 X_dot = X[:, 1:] - X[:, :-1]
-
 
 m = X.shape[0]
 n = X.shape[1]
@@ -39,40 +59,31 @@ n = X.shape[1]
 w_j = np.random.rand(m, 1)
 # w_j = np.ones((m, 1))
 
+
 # Hyperparameters
 # min (1/2n)||w_j X_dot||^2_2 + lam_1 ||w_j||_1 + (lam_2 / 2) ||w_j||^2_2
 # gamma is the gradient step size in proximal gradient descent
-# gamma = 2e-5, lam_1 = 0.1, lam_2 = 1
-gamma = 2e-5
+# Some good parameters: lam_1=0.1, lam_2=1, gamma=2e-5
 lam_1 = 0.1
 lam_2 = 1
+gamma = 2e-5
 
 A = (X_dot @ X_dot.T) / n
 B = (1 - (lam_2 / lam_1) * gamma) * np.eye(m) - (gamma / lam_1) * A
 
 # Convergence parameters
-convergence_tolerance = 1e-5
+convergence_tolerance = 1e-4
 max_iter = 10000
-iter = 0
-error = 1
 
-while error > convergence_tolerance:
-    wk = iter / (iter + 3)
-
-    w_j_prev = np.copy(w_j)
-    y_j = w_j + wk * (w_j - w_j_prev)
-    w_j = soft_thresholding(B @ y_j, gamma)
-
-    iter += 1
-    if iter >= max_iter:
-        print("Reached max iterations")
-        break
-    elif np.isnan(w_j).any():
-        raise ValueError("Reached invalid value in array")
-    error = np.linalg.norm(w_j_prev - w_j) / np.linalg.norm(w_j_prev)
-
+start = time.time()
+w_j = accelerated_pgd(B, w_j, gamma, max_iter, convergence_tolerance)
+end = time.time()
 w_j = w_j / np.linalg.norm(w_j)
 
+
+"""-------------------- Results and Plotting --------------------"""
+# Sparse results
+print(f"Convereged in {end - start} seconds")
 y_j = w_j.T @ X
 print(w_j.reshape((-1,)))
 w_j = w_j.flat
@@ -88,6 +99,7 @@ Z_dot = Q.T @ X_dot
 P, Omega, PT = np.linalg.svd(np.cov(Z_dot))
 W = (Q @ P).T
 
+# Compare SFA to sparse feature
 _f1, ax1 = plt.subplots()
 ax1.plot((W @ X)[-1, :], label=f'Slowest from SFA - Speed = {Omega[-1]}')
 ax1.plot(y_j.flat, label=f'Sparse Output - Speed = {ssfa_speed}')
@@ -96,6 +108,7 @@ ax1.set_title("Signal Outputs")
 ax1.set_xlabel("Sample")
 ax1.set_ylabel("$y_1(t)$")
 
+# Plot weight contributions
 _f2, ax2 = plt.subplots()
 order = np.argsort(-1 * np.abs(w_j))
 cum_percent = np.cumsum(np.abs(w_j)[order]) / np.sum(np.abs(w_j))
