@@ -27,7 +27,7 @@ def soft_thresholding(v: np.ndarray, t: float) -> np.ndarray:
     return(v_star)
 
 
-def accelerated_pgd(B, x, gamma=2e-5, max_iter=10000, conv_tol=1e-5):
+def accelerated_pgd(grad_g, x, gamma=2e-5, max_iter=1000, conv_tol=1e-6):
 
     iter = 0
     error = 1
@@ -36,55 +36,121 @@ def accelerated_pgd(B, x, gamma=2e-5, max_iter=10000, conv_tol=1e-5):
 
         x_prev = np.copy(x)
         y = x + wk * (x - x_prev)
-        x = soft_thresholding(B @ y, gamma)
+        step = y - gamma * grad_g(y)
+
+        x = soft_thresholding(step.reshape((-1)), gamma).reshape(y.shape)
 
         iter += 1
         if iter >= max_iter:
             print("Reached max iterations")
             break
-        elif np.isnan(x).any():
-            raise ValueError("Reached invalid value in array")
-        error = np.linalg.norm(x - x_prev) / np.linalg.norm(x_prev)
+        # error = np.linalg.norm(x - x_prev) / np.linalg.norm(x_prev)
+        error = np.linalg.norm(step)
     return(x)
 
 
-X, T0, T4, T5, T10 = tep_import.import_tep_sets()
-X = X - np.mean(X, axis=1).reshape((-1, 1))
-X_dot = X[:, 1:] - X[:, :-1]
+def admm(prox_g, prox_h, gamma, m, max_iter=10000, conv_tol=1e-5):
+    iter = 0
+    error = 1
+    z = np.random.rand(m)
+    u = np.random.rand(m)
+    while error > conv_tol:
+        x = prox_g(z - u, gamma)
+        z = prox_h(x + u, gamma)
+        u = u + x - z
 
+        iter += 1
+        if iter >= max_iter:
+            print("Reached max iterations")
+            break
+        error = np.linalg.norm(x) / np.linalg.norm(z)
+    return(x, z)
+
+
+X, T0, T4, T5, T10 = tep_import.import_tep_sets()
 m = X.shape[0]
 n = X.shape[1]
 
-# How this is initialized greatly affects results
-w_j = np.random.rand(m, 1)
-# w_j = np.ones((m, 1))
+X = X - np.mean(X, axis=1).reshape((-1, 1))
+# X = X / np.std(X, axis=1).reshape((-1, 1))
 
+X_dot = X[:, 1:] - X[:, :-1]
+A = (X_dot @ X_dot.T) / n
+B = (X @ X.T) / n
 
 # Hyperparameters
 # min (1/2n)||w_j X_dot||^2_2 + lam_1 ||w_j||_1 + (lam_2 / 2) ||w_j||^2_2
 # gamma is the gradient step size in proximal gradient descent
+
+# Convergence parameters
+convergence_tolerance = 0.2
+max_iter = 5000
+
+# Accelerated Proximal Gradient Descent
 # Some good parameters: lam_1=0.1, lam_2=1, gamma=2e-5
 lam_1 = 0.1
 lam_2 = 1
+lam_3 = 0.001
 gamma = 2e-5
+mu = 1
+# How this is initialized greatly affects results
+# w_j = np.random.rand(1, m)
+w_j = np.ones((1, m))
 
-A = (X_dot @ X_dot.T) / n
-B = (1 - (lam_2 / lam_1) * gamma) * np.eye(m) - (gamma / lam_1) * A
 
-# Convergence parameters
-convergence_tolerance = 1e-4
-max_iter = 10000
+# def grad_g(x):
+#     y1 = x @ A
+#     y2 = lam_2 * x
+#     y = (y1 + y2) / lam_1
+#     return(y)
 
-start = time.time()
-w_j = accelerated_pgd(B, w_j, gamma, max_iter, convergence_tolerance)
-end = time.time()
-w_j = w_j / np.linalg.norm(w_j)
+
+# def grad_g(x):
+#     xB = x @ B
+#     y1 = x @ A
+#     y2 = lam_2 * x
+#     y3 = 2 * lam_3 * (xB @ x.T - 1) @ xB
+#     y = (y1 + y2 + y3) / lam_1
+#     return(y)
+
+
+while True:
+    def grad_g(x):
+        y1 = x @ A
+        y2 = x @ B
+        c1 = x @ B @ x.T - 1
+        y3 = -1 * (mu / c1) * y2
+        return(y1 + y2 + y3)
+
+    start = time.time()
+    w_j = accelerated_pgd(grad_g, w_j, gamma, max_iter, convergence_tolerance)
+    total_time = time.time() - start
+    mu *= 0.5
+    if mu <= 1e-16:
+        break
+
+# Alternating Direction Method of Multipliers
+# Some good parameters: lam_1=0.1, lam_2=0.25, gamma=2e-5
+# lam_1 = 0.1
+# lam_2 = 0.25
+# gamma = 2e-5
+# B = gamma * A + (gamma * lam_2 + lam_1) * np.eye(m)
+# B_inv = lam_1 * np.linalg.inv(B)
+
+
+# def prox_g(v, gamma):
+#     return(v @ B_inv)
+
+
+# start = time.time()
+# _, w_j = admm(prox_g, soft_thresholding, gamma, m)
+# total_time = time.time() - start
 
 
 """-------------------- Results and Plotting --------------------"""
 # Sparse results
-print(f"Convereged in {end - start} seconds")
-y_j = w_j.T @ X
+print(f"Convereged in {total_time} seconds")
+y_j = w_j @ X
 print(w_j.reshape((-1,)))
 w_j = w_j.flat
 ssfa_speed = np.linalg.norm(y_j) / y_j.size
