@@ -2,18 +2,7 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 import tep_import
-# Good Seeds
-np.random.seed(3534848)
-# np.random.seed(282829)
-# np.random.seed(35231238)
-# np.random.seed(94219)
-# np.random.seed(531784)
-
-# Bad Seeds
-# np.random.seed(5)
-# np.random.seed(2652352)
-# np.random.seed(2246)
-# np.random.seed(98123)
+from math import log
 
 
 def soft_thresholding(v: np.ndarray, t: float) -> np.ndarray:
@@ -49,103 +38,61 @@ def accelerated_pgd(grad_g, x, gamma=2e-5, max_iter=1000, conv_tol=1e-6):
     return(x)
 
 
-def admm(prox_g, prox_h, gamma, m, max_iter=10000, conv_tol=1e-5):
-    iter = 0
-    error = 1
-    z = np.random.rand(m)
-    u = np.random.rand(m)
-    while error > conv_tol:
-        x = prox_g(z - u, gamma)
-        z = prox_h(x + u, gamma)
-        u = u + x - z
-
-        iter += 1
-        if iter >= max_iter:
-            print("Reached max iterations")
-            break
-        error = np.linalg.norm(x) / np.linalg.norm(z)
-    return(x, z)
-
-
 X, T0, T4, T5, T10 = tep_import.import_tep_sets()
 m = X.shape[0]
 n = X.shape[1]
 
 X = X - np.mean(X, axis=1).reshape((-1, 1))
-# X = X / np.std(X, axis=1).reshape((-1, 1))
-
-X_dot = X[:, 1:] - X[:, :-1]
-A = (X_dot @ X_dot.T) / n
-B = (X @ X.T) / n
-
-# Hyperparameters
-# min (1/2n)||w_j X_dot||^2_2 + lam_1 ||w_j||_1 + (lam_2 / 2) ||w_j||^2_2
-# gamma is the gradient step size in proximal gradient descent
 
 # Convergence parameters
-convergence_tolerance = 0.2
-max_iter = 5000
+conv_tol = 0.2
+max_iter = 10000
 
-# Accelerated Proximal Gradient Descent
-# Some good parameters: lam_1=0.1, lam_2=1, gamma=2e-5
-lam_1 = 0.1
-lam_2 = 1
-lam_3 = 0.001
+
+all_gradients = []
+all_f_values = []
+
 gamma = 2e-5
-mu = 1
-# How this is initialized greatly affects results
-# w_j = np.random.rand(1, m)
-w_j = np.ones((1, m))
+beta = 0.5
 
+W = None
+j = 2
 
-# def grad_g(x):
-#     y1 = x @ A
-#     y2 = lam_2 * x
-#     y = (y1 + y2) / lam_1
-#     return(y)
+X_orig = np.copy(X)
+start = time.time()
+for i in range(j):
+    # w_j = np.random.rand(1, m)
+    w_j = np.ones((1, m))
+    X_dot = X[:, 1:] - X[:, :-1]
+    A = (X_dot @ X_dot.T) / n
+    B = (X @ X.T) / n
+    mu = 1
 
+    while True:
+        gradients = []
+        f_values = []
 
-# def grad_g(x):
-#     xB = x @ B
-#     y1 = x @ A
-#     y2 = lam_2 * x
-#     y3 = 2 * lam_3 * (xB @ x.T - 1) @ xB
-#     y = (y1 + y2 + y3) / lam_1
-#     return(y)
+        def grad_g(x):
+            y1 = x @ A
+            xB = x @ B
+            c1 = xB @ x.T - 1
+            y2 = -1 * (mu / c1) * xB
+            gradients.append(np.linalg.norm(y1 + y2))
+            f_values.append(0.5 * float(y1 @ x.T - mu * log(xB @ x.T - 1)))
+            return(y1 + y2)
 
+        w_j = accelerated_pgd(grad_g, w_j, gamma, max_iter, conv_tol)
+        all_gradients.append(gradients)
+        all_f_values.append(f_values)
+        mu *= beta
+        if mu <= 1e-16:
+            break
 
-while True:
-    def grad_g(x):
-        y1 = x @ A
-        y2 = x @ B
-        c1 = x @ B @ x.T - 1
-        y3 = -1 * (mu / c1) * y2
-        return(y1 + y2 + y3)
-
-    start = time.time()
-    w_j = accelerated_pgd(grad_g, w_j, gamma, max_iter, convergence_tolerance)
-    total_time = time.time() - start
-    mu *= 0.5
-    if mu <= 1e-16:
-        break
-
-# Alternating Direction Method of Multipliers
-# Some good parameters: lam_1=0.1, lam_2=0.25, gamma=2e-5
-# lam_1 = 0.1
-# lam_2 = 0.25
-# gamma = 2e-5
-# B = gamma * A + (gamma * lam_2 + lam_1) * np.eye(m)
-# B_inv = lam_1 * np.linalg.inv(B)
-
-
-# def prox_g(v, gamma):
-#     return(v @ B_inv)
-
-
-# start = time.time()
-# _, w_j = admm(prox_g, soft_thresholding, gamma, m)
-# total_time = time.time() - start
-
+    scalar_projections = (w_j @ X) / (w_j @ w_j.T)
+    vector_projections = np.hstack([w_j.T] * n)
+    X = X - vector_projections @ np.diag(scalar_projections.flat)
+total_time = time.time() - start
+X = X_orig
 
 """-------------------- Results and Plotting --------------------"""
 # Sparse results
@@ -167,7 +114,7 @@ W = (Q @ P).T
 
 # Compare SFA to sparse feature
 _f1, ax1 = plt.subplots()
-ax1.plot((W @ X)[-1, :], label=f'Slowest from SFA - Speed = {Omega[-1]}')
+ax1.plot((W @ X)[-j, :], label=f'Slowest from SFA - Speed = {Omega[-j]}')
 ax1.plot(y_j.flat, label=f'Sparse Output - Speed = {ssfa_speed}')
 ax1.legend()
 ax1.set_title("Signal Outputs")
@@ -175,19 +122,59 @@ ax1.set_xlabel("Sample")
 ax1.set_ylabel("$y_1(t)$")
 
 # Plot weight contributions
-_f2, ax2 = plt.subplots()
+_f2, ax21 = plt.subplots()
 order = np.argsort(-1 * np.abs(w_j))
 cum_percent = np.cumsum(np.abs(w_j)[order]) / np.sum(np.abs(w_j))
 ordered_weights = np.abs(w_j)[order]
 bar_labels = [str(x + 1) for x in order]
 
-ax2.bar(bar_labels, ordered_weights)
-ax3 = ax2.twinx()
-ax3.plot(cum_percent, 'g')
-ax2.set_title("Sparse Weights")
+ax21.bar(bar_labels, ordered_weights)
+ax22 = ax21.twinx()
+ax22.plot(cum_percent, 'g')
+ax21.set_title("Sparse Weights")
 
-ax2.set_xlabel("$i$")
-ax2.set_ylabel("$|(w_j)_i|$")
-ax3.set_ylabel("Cumulative Weights")
+ax21.set_xlabel("$i$")
+ax21.set_ylabel("$|(w_j)_i|$")
+ax22.set_ylabel("Cumulative Weights")
+
+# Gradients over iterations
+_f3, ax3 = plt.subplots()
+for i, data in enumerate(all_gradients):
+    if len(data) <= 10:
+        continue
+    ax3.plot(data, label=f"$\mu$ iteration {i}")
+ax3.set_yscale('log')
+ax3.legend()
+ax3.set_xlabel("PGD Iteration")
+ax3.set_title("Gradient Over Iterations")
+
+# f values over iterations
+_f4, ax4 = plt.subplots()
+for i, data in enumerate(all_f_values):
+    if len(data) <= 10:
+        continue
+    ax4.plot(data, label=f"$\mu$ iteration {i}")
+ax4.set_yscale('log')
+ax4.legend()
+ax4.set_xlabel("PGD Iteration")
+ax4.set_title("$f$ Values Over Iterations")
+
+# Original SFA weights
+_f5, ax51 = plt.subplots()
+
+sfa_order = np.argsort(-1 * np.abs(W[-j]))
+sfa_cum_percent = np.cumsum(np.abs(W[-j])[sfa_order]) / np.sum(np.abs(W[-j]))
+sfa_ordered_weights = np.abs(W[-j])[sfa_order]
+sfa_bar_labels = [str(x + 1) for x in sfa_order]
+
+ax51.bar(sfa_bar_labels, sfa_ordered_weights)
+ax52 = ax51.twinx()
+ax52.plot(sfa_cum_percent, 'r')
+ax51.set_yscale('log')
+ax51.set_title("Original SFA Normalized Weights")
+
+ax51.set_xlabel("$i$")
+ax51.set_ylabel("$|(w_j)_i|$")
+ax52.set_ylabel("Cumulative Weights")
 
 plt.show()
