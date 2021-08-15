@@ -1,11 +1,22 @@
 import time
+from math import log
+from typing import Callable, Tuple
+
 import numpy as np
 import matplotlib.pyplot as plt
+
 import tep_import
-from math import log
 
 
-def soft_thresholding(v: np.ndarray, t: float) -> np.ndarray:
+def soft_thresholding(v: np.ndarray,
+                      t: float) -> np.ndarray:
+    """
+    Soft Thresholding Function
+    v: np.ndarray
+        The vector to perform thresholding
+    t: float
+        The threshold value
+    """
     v_star = np.zeros_like(v)
     for i in range(v.size):
         if v[i] > t:
@@ -16,86 +27,232 @@ def soft_thresholding(v: np.ndarray, t: float) -> np.ndarray:
     return(v_star)
 
 
-def accelerated_pgd(grad_g, x, gamma=2e-5, max_iter=1000, conv_tol=1e-6):
+def backtracking(g: Callable[[np.ndarray], np.ndarray],
+                 grad_g: Callable[[np.ndarray], np.ndarray],
+                 prox_f: Callable[[np.ndarray, float], np.ndarray],
+                 y: np.ndarray,
+                 gamma: float,
+                 beta: float = 0.5) -> Tuple[np.ndarray, float]:
+    def g_hat(x1, x2):
+        c1 = g(x2)
+        c2 = grad_g(x2) @ (x1 - x2).T
+        c3 = 1 / (2 * gamma) * (x1 - x2) @ (x1 - x2).T
+        return(float(c1 + c2 + c3))
+
+    while True:
+        step = (y - gamma * grad_g(y)).reshape((-1))
+        z = prox_f(step, gamma).reshape((1, -1))
+        if g(z) <= g_hat(z, y):
+            break
+        gamma *= beta
+    return(z, gamma)
+
+
+def accelerated_pgd(g: Callable[[np.ndarray], np.ndarray],
+                    grad_g: Callable[[np.ndarray], np.ndarray],
+                    prox_f: Callable[[np.ndarray, float], np.ndarray],
+                    x: np.ndarray,
+                    gamma: float,
+                    step_size: float,
+                    max_iter: int,
+                    conv_tol: float) -> np.ndarray:
+    """
+    Accelerated Proximal Gradient Descent Algorithm
+
+    Parameters:
+    -----------
+    grad_g: function(np.ndarray) -> np.ndarray
+        A function that takes a vector of variables x and returns the gradient
+        of the differentiable part of the optimization function
+    x: np.ndarray
+        The vector of variables of the optimization function
+    prox_f: function(np.ndarray, float) -> np.ndarray
+        The proximal function of the non-differentiable part of the
+        optimization function which takes a vector of variables x, a proximal
+        variable gamma, and returns a vector of variables
+    gamma: float
+        The step size of the gradient descent and variable of the proximal
+        function
+    max_iter: int
+        The maximum number of iterations to run if the convergence tolerance
+        isn't reached
+    conv_tol: float
+        Once the error is below this tolerance, the algorithm stops iterating
+
+    Outputs:
+    --------
+    x: np.ndarray
+        The proximal vector of variables
+    """
 
     iter = 0
     error = 1
     while error > conv_tol:
+        # Acceleration using previous vector
         wk = iter / (iter + 3)  # Acceleration parameter
-
         x_prev = np.copy(x)
         y = x + wk * (x - x_prev)
-        step = y - gamma * grad_g(y)
 
-        x = soft_thresholding(step.reshape((-1)), gamma).reshape(y.shape)
+        # Descent and then proximal operator
+        # step = (y - step_size * grad_g(y)).reshape((-1))
+        # x = prox_f(step, gamma).reshape(y.shape)
+        x, gamma = backtracking(g=g,
+                                grad_g=grad_g,
+                                prox_f=prox_f,
+                                y=y,
+                                gamma=gamma)
 
+        # Convergence checks
         iter += 1
         if iter >= max_iter:
             print("Reached max iterations")
             break
-        # error = np.linalg.norm(x - x_prev) / np.linalg.norm(x_prev)
-        error = np.linalg.norm(step)
+        error = float(np.linalg.norm(x - x_prev) / np.linalg.norm(x_prev))
+
     return(x)
 
 
+def sparse_SFA(cov_X: np.ndarray,
+               cov_X_dot: np.ndarray,
+               j: int,
+               beta: float = 0.5,
+               gamma: float = 1e-4,
+               step_size: float = 2e-5,
+               max_iter: int = 10000,
+               conv_tol: float = 1e-3):
+    """
+    Sparse Slow Feature Analysis
+
+    Parameters:
+    -----------
+    cov_X: np.ndarray
+        The covariance matrix of the data
+    cov_X_dot: np.ndarray
+        The covariance matrix of the derivative of the data
+    j: int
+        The number of slow features to extract
+    beta: float
+        The scaling of the barrier variable after each iteration of the
+        interior point method
+    gamma: float
+        The thresholding parameter
+    step_size: float
+        The step size of proximal gradient descent
+    conv_tol: float
+        The error value at which to stop iterating proximal gradient descent
+    max_iter: int
+        The maximum number of iterations to run of proximal gradient descent
+    """
+    m = cov_X.shape[0]
+    prev_W = np.zeros((m, 1))
+
+    for i in range(j):
+        w_j = np.ones((1, m))
+        mu = 1
+
+        while mu > 1e-16:
+            grad_vals = []
+            f_vals = []
+
+            if i == 0:
+                def g(x):
+                    y1 = x @ cov_X_dot @ x.T
+                    try:
+                        y2 = -1 * mu * log(x @ cov_X @ x.T - 1)
+                    except ValueError:
+                        y2 = 1e16
+                    return(0.5 * float(y1 + y2))
+
+                def grad_g(x):
+                    xB = x @ cov_X
+                    c1 = xB @ x.T - 1
+
+                    y1 = x @ cov_X_dot
+                    y2 = -1 * (mu / c1) * xB
+                    return(y1 + y2)
+            else:
+                def g(x):
+                    xBW = x @ cov_X @ prev_W
+                    y1 = x @ cov_X_dot @ x.T
+                    try:
+                        y2 = -1 * mu * log(x @ cov_X @ x.T - 1)
+                    except ValueError:
+                        y2 = 1e16
+                    y3 = xBW @ xBW.T
+                    return(0.5 * float(y1 + y2 + y3))
+
+                def grad_g(x):
+                    xB = x @ cov_X
+                    BW = cov_X @ prev_W
+                    xBW = x @ BW
+
+                    c1 = xB @ x.T - 1
+                    # c2 = xBW @ xBW.T
+
+                    y1 = x @ cov_X_dot
+                    y2 = -1 * (mu / c1) * xB
+                    # y3 = -1 * (mu / c2) * xBW @ BW.T
+                    y3 = xBW @ BW.T
+
+                    # grad_vals.append(np.linalg.norm(y1 + y2 + y3))
+                    # f_vals.append(0.5 * float(y1 @ x.T + y3 @ x.T - mu * log(c1)))
+                    return(y1 + y2 + y3)
+
+            w_j = accelerated_pgd(g=g,
+                                  grad_g=grad_g,
+                                  prox_f=soft_thresholding,
+                                  x=w_j,
+                                  gamma=gamma,
+                                  step_size=step_size,
+                                  max_iter=max_iter,
+                                  conv_tol=conv_tol)
+
+            all_gradients.append(grad_vals)
+            all_f_values.append(f_vals)
+            mu *= beta
+
+        if i == 0:
+            prev_W = np.copy(w_j.T)
+        else:
+            prev_W = np.hstack((prev_W, w_j.T))
+    return(w_j)
+
+
+"""------------------------- Import Data Sets ------------------------------"""
 X, T0, T4, T5, T10 = tep_import.import_tep_sets()
 m = X.shape[0]
-n = X.shape[1]
+n = X.shape[1] - 1
 
+"""------------------------- Calculate Covariances -------------------------"""
 X = X - np.mean(X, axis=1).reshape((-1, 1))
+X_dot = X[:, 1:] - X[:, :-1]
+cov_X_dot = (X_dot @ X_dot.T) / n
+cov_X = (X @ X.T) / n
 
-# Convergence parameters
-conv_tol = 0.2
+"""------------------------- Set Parameters --------------------------------"""
+conv_tol = 1e-6
 max_iter = 10000
-
+gamma = 1
+step_size = 1e-3
+beta = 0.1
+j = 1
 
 all_gradients = []
 all_f_values = []
 
-gamma = 2e-5
-beta = 0.5
-
-W = None
-j = 2
-
-X_orig = np.copy(X)
-start = time.time()
-for i in range(j):
-    # w_j = np.random.rand(1, m)
-    w_j = np.ones((1, m))
-    X_dot = X[:, 1:] - X[:, :-1]
-    A = (X_dot @ X_dot.T) / n
-    B = (X @ X.T) / n
-    mu = 1
-
-    while True:
-        gradients = []
-        f_values = []
-
-        def grad_g(x):
-            y1 = x @ A
-            xB = x @ B
-            c1 = xB @ x.T - 1
-            y2 = -1 * (mu / c1) * xB
-            gradients.append(np.linalg.norm(y1 + y2))
-            f_values.append(0.5 * float(y1 @ x.T - mu * log(xB @ x.T - 1)))
-            return(y1 + y2)
-
-        w_j = accelerated_pgd(grad_g, w_j, gamma, max_iter, conv_tol)
-        all_gradients.append(gradients)
-        all_f_values.append(f_values)
-        mu *= beta
-        if mu <= 1e-16:
-            break
-
-    scalar_projections = (w_j @ X) / (w_j @ w_j.T)
-    vector_projections = np.hstack([w_j.T] * n)
-    X = X - vector_projections @ np.diag(scalar_projections.flat)
-total_time = time.time() - start
-X = X_orig
-
-"""-------------------- Results and Plotting --------------------"""
+"""------------------------- Results and Plotting --------------------------"""
 # Sparse results
+start = time.time()
+w_j = sparse_SFA(cov_X=cov_X,
+                 cov_X_dot=cov_X_dot,
+                 j=j,
+                 beta=beta,
+                 gamma=gamma,
+                 step_size=step_size,
+                 max_iter=max_iter,
+                 conv_tol=conv_tol)
+total_time = time.time() - start
+
 print(f"Convereged in {total_time} seconds")
 y_j = w_j @ X
 print(w_j.reshape((-1,)))
