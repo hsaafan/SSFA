@@ -33,6 +33,33 @@ def backtracking(g: Callable[[np.ndarray], np.ndarray],
                  y: np.ndarray,
                  gamma: float,
                  beta: float = 0.5) -> Tuple[np.ndarray, float]:
+    """
+    Backtracking algorithm to find proximal function parameter
+
+    Parameters:
+    -----------
+    g: function(np.ndarray) -> np.ndarray
+        The differentiable part of the cost function
+    grad_g: function(np.ndarray) -> np.ndarray
+        A function that takes a vector of variables x and returns the gradient
+        of the differentiable part of the optimization function
+    prox_f: function(np.ndarray, float) -> np.ndarray
+        The proximal function of the non-differentiable part of the
+        optimization function which takes a vector of variables x, a proximal
+        variable gamma, and returns a vector of variables
+    y: np.ndarray
+
+    gamma: float
+
+    beta: float
+
+    Outputs:
+    --------
+    z: np.ndarray
+
+    gamma: float
+
+    """
     def g_hat(x1, x2):
         c1 = g(x2)
         c2 = grad_g(x2) @ (x1 - x2).T
@@ -53,7 +80,6 @@ def accelerated_pgd(g: Callable[[np.ndarray], np.ndarray],
                     prox_f: Callable[[np.ndarray, float], np.ndarray],
                     x: np.ndarray,
                     gamma: float,
-                    step_size: float,
                     max_iter: int,
                     conv_tol: float) -> np.ndarray:
     """
@@ -61,18 +87,19 @@ def accelerated_pgd(g: Callable[[np.ndarray], np.ndarray],
 
     Parameters:
     -----------
+    g: function(np.ndarray) -> np.ndarray
+        The differentiable part of the cost function
     grad_g: function(np.ndarray) -> np.ndarray
         A function that takes a vector of variables x and returns the gradient
         of the differentiable part of the optimization function
-    x: np.ndarray
-        The vector of variables of the optimization function
     prox_f: function(np.ndarray, float) -> np.ndarray
         The proximal function of the non-differentiable part of the
         optimization function which takes a vector of variables x, a proximal
         variable gamma, and returns a vector of variables
+    x: np.ndarray
+        The vector of variables of the optimization function
     gamma: float
-        The step size of the gradient descent and variable of the proximal
-        function
+
     max_iter: int
         The maximum number of iterations to run if the convergence tolerance
         isn't reached
@@ -83,25 +110,29 @@ def accelerated_pgd(g: Callable[[np.ndarray], np.ndarray],
     --------
     x: np.ndarray
         The proximal vector of variables
+    gradients: array
+
+    costs: array
+
     """
 
     iter = 0
     error = 1
+    gradients = []
+    costs = []
     while error > conv_tol:
         # Acceleration using previous vector
         wk = iter / (iter + 3)  # Acceleration parameter
         x_prev = np.copy(x)
         y = x + wk * (x - x_prev)
 
-        # Descent and then proximal operator
-        # step = (y - step_size * grad_g(y)).reshape((-1))
-        # x = prox_f(step, gamma).reshape(y.shape)
         x, gamma = backtracking(g=g,
                                 grad_g=grad_g,
                                 prox_f=prox_f,
                                 y=y,
                                 gamma=gamma)
-
+        costs.append(g(x))
+        gradients.append(np.linalg.norm(grad_g(x)))
         # Convergence checks
         iter += 1
         if iter >= max_iter:
@@ -109,7 +140,7 @@ def accelerated_pgd(g: Callable[[np.ndarray], np.ndarray],
             break
         error = float(np.linalg.norm(x - x_prev) / np.linalg.norm(x_prev))
 
-    return(x)
+    return(x, gradients, costs)
 
 
 def sparse_SFA(cov_X: np.ndarray,
@@ -117,7 +148,6 @@ def sparse_SFA(cov_X: np.ndarray,
                j: int,
                beta: float = 0.5,
                gamma: float = 1e-4,
-               step_size: float = 2e-5,
                max_iter: int = 10000,
                conv_tol: float = 1e-3):
     """
@@ -136,24 +166,29 @@ def sparse_SFA(cov_X: np.ndarray,
         interior point method
     gamma: float
         The thresholding parameter
-    step_size: float
-        The step size of proximal gradient descent
-    conv_tol: float
-        The error value at which to stop iterating proximal gradient descent
     max_iter: int
         The maximum number of iterations to run of proximal gradient descent
+    conv_tol: float
+        The error value at which to stop iterating proximal gradient descent
+
+    Outputs:
+    --------
+    w_j: np.ndarray
+
+    all_gradients: array
+
+    all_costs: array
+
     """
     m = cov_X.shape[0]
-    prev_W = np.zeros((m, 1))
-
+    prev_W = np.ones((m, 1))
     for i in range(j):
         w_j = np.ones((1, m))
         mu = 1
+        all_gradients = []
+        all_costs = []
 
         while mu > 1e-16:
-            grad_vals = []
-            f_vals = []
-
             if i == 0:
                 def g(x):
                     y1 = x @ cov_X_dot @ x.T
@@ -191,31 +226,27 @@ def sparse_SFA(cov_X: np.ndarray,
 
                     y1 = x @ cov_X_dot
                     y2 = -1 * (mu / c1) * xB
-                    # y3 = -1 * (mu / c2) * xBW @ BW.T
                     y3 = xBW @ BW.T
 
-                    # grad_vals.append(np.linalg.norm(y1 + y2 + y3))
-                    # f_vals.append(0.5 * float(y1 @ x.T + y3 @ x.T - mu * log(c1)))
                     return(y1 + y2 + y3)
 
-            w_j = accelerated_pgd(g=g,
-                                  grad_g=grad_g,
-                                  prox_f=soft_thresholding,
-                                  x=w_j,
-                                  gamma=gamma,
-                                  step_size=step_size,
-                                  max_iter=max_iter,
-                                  conv_tol=conv_tol)
+            w_j, gradient, cost = accelerated_pgd(g=g,
+                                                  grad_g=grad_g,
+                                                  prox_f=soft_thresholding,
+                                                  x=w_j,
+                                                  gamma=gamma,
+                                                  max_iter=max_iter,
+                                                  conv_tol=conv_tol)
 
-            all_gradients.append(grad_vals)
-            all_f_values.append(f_vals)
+            all_gradients.append(gradient)
+            all_costs.append(cost)
             mu *= beta
 
         if i == 0:
             prev_W = np.copy(w_j.T)
         else:
             prev_W = np.hstack((prev_W, w_j.T))
-    return(w_j)
+    return(w_j, all_gradients, all_costs)
 
 
 """------------------------- Import Data Sets ------------------------------"""
@@ -224,40 +255,40 @@ m = X.shape[0]
 n = X.shape[1] - 1
 
 """------------------------- Calculate Covariances -------------------------"""
-X = X - np.mean(X, axis=1).reshape((-1, 1))
+X_mean = np.mean(X, axis=1).reshape((-1, 1))
+X = X - X_mean
+X_std = np.std(X, axis=1).reshape((-1, 1))
+X = X / X_std
+
 X_dot = X[:, 1:] - X[:, :-1]
 cov_X_dot = (X_dot @ X_dot.T) / n
 cov_X = (X @ X.T) / n
 
 """------------------------- Set Parameters --------------------------------"""
-conv_tol = 1e-6
+conv_tol = 1e-3
 max_iter = 10000
 gamma = 1
-step_size = 1e-3
-beta = 0.1
-j = 1
-
-all_gradients = []
-all_f_values = []
+beta = 0.9
+j = 4
 
 """------------------------- Results and Plotting --------------------------"""
 # Sparse results
 start = time.time()
-w_j = sparse_SFA(cov_X=cov_X,
-                 cov_X_dot=cov_X_dot,
-                 j=j,
-                 beta=beta,
-                 gamma=gamma,
-                 step_size=step_size,
-                 max_iter=max_iter,
-                 conv_tol=conv_tol)
+w_j, all_gradients, all_costs = sparse_SFA(cov_X=cov_X,
+                                           cov_X_dot=cov_X_dot,
+                                           j=j,
+                                           beta=beta,
+                                           gamma=gamma,
+                                           max_iter=max_iter,
+                                           conv_tol=conv_tol)
 total_time = time.time() - start
 
 print(f"Convereged in {total_time} seconds")
 y_j = w_j @ X
+y_j_dot = y_j[:, 1:] - y_j[:, :-1]
 print(w_j.reshape((-1,)))
 w_j = w_j.flat
-ssfa_speed = np.linalg.norm(y_j) / y_j.size
+ssfa_speed = float(y_j_dot @ y_j_dot.T) / y_j.size
 print(f"Zero weights: {m - np.count_nonzero(w_j)}")
 print(f"Speed: {ssfa_speed}")
 
@@ -307,7 +338,7 @@ ax3.set_title("Gradient Over Iterations")
 
 # f values over iterations
 _f4, ax4 = plt.subplots()
-for i, data in enumerate(all_f_values):
+for i, data in enumerate(all_costs):
     if len(data) <= 10:
         continue
     ax4.plot(data, label=f"$\mu$ iteration {i}")
