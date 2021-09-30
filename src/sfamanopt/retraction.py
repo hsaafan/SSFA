@@ -29,8 +29,8 @@ def orthogonality_metric(X: np.ndarray, A: np.ndarray) -> float:
     """Metric to determine how orthogonal a matrix is where 0 is a perfectly
     orthogonal matrix"""
     p = X.shape[1]
-    I = np.eye(p)
-    metric = np.linalg.norm(X.T @ A @ X - I) / np.linalg.norm(I)
+    Ident = np.eye(p)
+    metric = np.linalg.norm(X.T @ A @ X - Ident) / np.linalg.norm(Ident)
     return(metric)
 
 
