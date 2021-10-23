@@ -10,11 +10,7 @@ def hard_threshold(array: np.ndarray, eps: float) -> np.ndarray:
 
 def soft_threshold(array: np.ndarray, eps: float) -> np.ndarray:
     # Soft thresholding used as proximal operator of l1 norm
-    X = np.copy(array)
-    X[np.abs(X) < eps] = 0
-    X[X > eps] -= eps
-    X[X < -eps] += eps
-    return(X)
+    return(np.sign(array) * np.maximum(np.abs(array) - eps, 0))
 
 
 def shrinkage_operator(array: np.ndarray, eps: float) -> np.ndarray:

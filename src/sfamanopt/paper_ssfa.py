@@ -1,15 +1,15 @@
 import numpy as np
+from . import proximal
 
 
 class PaperSSFA:
-    def __init__(self) -> None:
-        pass
-
     def step_size(self, k: int, L: int = 3) -> float:
+        """FISTA step size"""
         alpha = k / (k + L)
         return(alpha)
 
     def construct_finite_difference_matrix(self, n: int) -> np.ndarray:
+        """Backward difference matrix to estimate derivative"""
         D = np.vstack(
                 (
                     np.zeros((1, n - 1)),
@@ -18,55 +18,38 @@ class PaperSSFA:
             ) - np.eye(n, n - 1)
         return(D)
 
-    def soft_thresholding(self, v: np.ndarray, t: float) -> np.ndarray:
-        """
-        Soft Thresholding Function
-        v: np.ndarray
-            The vector to perform thresholding
-        t: float
-            The threshold value
-        """
-        v_star = np.zeros_like(v)
-        for i in range(v.size):
-            if v[i] > t:
-                v_star[i] = v[i] - t
-            elif v[i] < -t:
-                v_star[i] = v[i] + t
-        return(v_star)
-
     def fista(self, Yj: np.ndarray,
               X: np.ndarray,
               mu: float,
               z: np.ndarray,
-              eps: float = 10,
-              max_iter: int = 100,
-              conv_tol: float = 1e-6) -> np.ndarray:
+              eps: float,
+              max_iter: int = 100) -> np.ndarray:
+        """FISTA algorithm"""
+        XTY = X.T @ Yj  # Calculate beforehand to save time on iterations
+        XTX = X.T @ X
 
         z_prev = np.zeros_like(z)
-        L = np.abs(2/mu) * np.linalg.norm(X.T @ X)
-        eps = 1/L
         for k in range(max_iter):
             w_k = self.step_size(k, 3)
             y = z + w_k * (z - z_prev)
             z_prev = z
-            step = y - eps * ((-2/mu) * X.T @ (Yj - X @ y))
-            z = self.soft_thresholding(step, eps)
-            if np.linalg.norm(z_prev - z) / np.linalg.norm(z_prev) < conv_tol:
-                break
-
+            step = y - eps * ((-2/mu) * (XTY - XTX @ y))
+            z = proximal.soft_threshold(step, eps)
         return(z)
 
     def optimize_r(self, Y, P):
-        # Formula from paper
-        U, D, VT = np.linalg.svd(Y.T @ Y @ P)
+        """Formula from paper in paragraph under Equation 13"""
+        U, D, VT = np.linalg.svd(Y.T @ Y @ P, full_matrices=False)
         R = U @ VT
         return(R)
 
     def optimize_p(self, Y, P, R, p_to_z, z_to_p, X, mu):
+        """Perform FISTA for each column vector of P"""
+        L = np.abs(2/mu) * np.linalg.norm(X.T @ X)  # Lipschitz constant
         for j in range(R.shape[1]):
             Y_star = Y @ R[:, j].reshape((-1, 1))
             z_j = p_to_z @ P[:, j].reshape((-1, 1))
-            z_j_optimal = self.fista(Y_star, X, mu, z_j).reshape((-1, ))
+            z_j_optimal = self.fista(Y_star, X, mu, z_j, 1/L).reshape((-1, ))
             P[:, j] = z_to_p @ z_j_optimal
         return(P)
 
@@ -75,6 +58,7 @@ class PaperSSFA:
                      p_to_z: np.ndarray,
                      Y: np.ndarray,
                      mu: float):
+        """Equation 9 from paper"""
         l2_norm = 0
         for i in range(Y.shape[0]):
             y_t = Y[i, :].reshape((-1, 1))
@@ -99,23 +83,29 @@ class PaperSSFA:
         self.derivative_covariance = np.cov(X @ D)
 
         L, Lambda, LT = np.linalg.svd(self.derivative_covariance)
-        L = L[:, :J]
-        LT = LT[:J, :]
-        Lambda = Lambda[:J]
+        """Take J largest singular vectors/values (Same as K from paper)"""
+        # L = L[:, :J]
+        # LT = LT[:J, :]
+        # Lambda = Lambda[:J]
+
+        """Transformations from paper"""
         x_to_y = np.diag(Lambda ** -0.5) @ LT
         p_to_z = L @ np.diag(Lambda ** -0.5)
         z_to_p = np.diag(Lambda ** 0.5) @ LT
 
+        """Paper has rows as samples instead of columns as samples"""
         X = X.T
-        Y = np.zeros((n, J))
+        Y = np.zeros((n, m))
         for i in range(Y.shape[0]):
             Y[i, :] = x_to_y @ X[i, :]
 
+        """Initial guesses"""
         if P is None:
-            P = np.eye(J, J)  # Initial guess
+            P = np.eye(m, J)
         if R is None:
-            R = np.eye(J, J)
+            R = np.eye(m, J)
 
+        """Convergence information and algorithm performance"""
         converged = False
         sparsity_values = []
         relative_errors = []
@@ -123,19 +113,22 @@ class PaperSSFA:
 
         cost = self.overall_cost(P, R, p_to_z, Y, mu)
         for k in range(max_iter):
+            """Alternatively optimize P and R"""
             P = self.optimize_p(Y, P, R, p_to_z, z_to_p, X, mu)
             R = self.optimize_r(Y, P)
 
+            """Create W matrix to check sparsity criteria"""
             W = np.zeros((m, J))
             for j in range(P.shape[1]):
                 q_j = P[:, j] / np.linalg.norm(P[:, j])
                 W[:, j] = p_to_z @ q_j
 
+            """Collect information about algorithm performance"""
             prev_cost = cost
             cost = self.overall_cost(R, P, p_to_z, Y, mu)
 
             rel_error = abs(cost - prev_cost) / abs(prev_cost)
-            sparsity_values.append(np.count_nonzero(W == 0) / np.size(W))
+            sparsity_values.append(np.count_nonzero(W <= 1e-6) / np.size(W))
             relative_errors.append(rel_error)
             cost_values.append(cost)
             if rel_error < err_tol:

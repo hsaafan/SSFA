@@ -37,8 +37,33 @@ if __name__ == "__main__":
     """Train Models"""
     ssfa_object = ssfa.SSFA("chol", "l1")
     paper_ssfa_object = oldssfa.PaperSSFA()
-    W, _, _, _ = ssfa_object.run(X, m)
-    W_old, _, _, _ = paper_ssfa_object.run(X, Md, mu=5)
+    W, costs, sparsity, errors = ssfa_object.run(X, Md)
+    W_old, costs_old, sparsity_old, errors_old = paper_ssfa_object.run(X, Md, mu=5)
+
+    plt.subplot(3, 1, 1)
+    plt.title("Sparsity")
+    plt.plot(sparsity, label='ours')
+    plt.plot(sparsity_old, label='paper')
+    plt.xlabel("Iteration")
+    plt.ylabel("Sparsity")
+    plt.legend(loc='upper right')
+
+    plt.subplot(3, 1, 2)
+    plt.title("Costs")
+    plt.plot(np.asarray(costs) - np.min(costs), label='ours')
+    plt.plot(np.asarray(costs_old) - np.min(costs_old), label='paper')
+    plt.xlabel("Iteration")
+    plt.ylabel("Cost (Shifted to 0 at minimum)")
+    plt.legend(loc='upper right')
+
+    plt.subplot(3, 1, 3)
+    plt.title("Relative Error")
+    plt.plot(errors[2:], label='ours')
+    plt.plot(errors_old[2:], label='paper')
+    plt.xlabel("Iteration")
+    plt.ylabel("Relative Error")
+    plt.legend(loc='upper right')
+    plt.show()
 
     """Order Features and take slowest subset"""
     Y = W.T @ X
