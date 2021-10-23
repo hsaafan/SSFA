@@ -73,7 +73,7 @@ class SSFA:
             eps *= beta
         return(eps, z)
 
-    def run(self, X: np.ndarray, eps: float = 1,
+    def run(self, X: np.ndarray, J: int, W: np.ndarray = None,
             max_iter: int = 500, err_tol: float = 1e-6):
         m, n = X.shape
         D = self.construct_finite_difference_matrix(n)
@@ -84,14 +84,16 @@ class SSFA:
         self.covariance = A
         self.derivative_covariance = B
 
-        W = np.eye(m, m)  # Initial guess
+        if W is None:
+            W = np.eye(m, J)  # Initial guess
 
         converged = False
         tangent_norm = 1e-12
         sparsity_values = []
         relative_errors = []
+        cost_values = []
         for k in range(max_iter):
-            tangent = W.T @ B + B.T @ W
+            tangent = 2 * B @ W  # Derivative of cost function
 
             prev_norm = tangent_norm
             tangent_norm = np.linalg.norm(tangent)
@@ -104,6 +106,7 @@ class SSFA:
             rel_error = abs(tangent_norm - prev_norm) / abs(prev_norm)
             sparsity_values.append(np.count_nonzero(W == 0) / np.size(W))
             relative_errors.append(rel_error)
+            cost_values.append(self.cost_function(W))
             if rel_error < err_tol:
                 print(f"Converged in {k} iterations with "
                       f"relative error of {rel_error}")
@@ -112,4 +115,4 @@ class SSFA:
         if not converged:
             print(f"Reached max iterations ({max_iter}) without converging, "
                   f"with final relative error of {rel_error}")
-        return(W, sparsity_values, relative_errors)
+        return(W, cost_values, sparsity_values, relative_errors)

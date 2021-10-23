@@ -133,3 +133,8 @@ TE_process/
 *.zip
 .venv/
 .vscode/
+dow/Dow Challenge Dataset_w Qin notes.pptx
+dow/ImpurityDataset_Traning.xlsx
+dow/ImpurityDataset_Validation.xlsx
+dow/testing.csv
+dow/training.csv
