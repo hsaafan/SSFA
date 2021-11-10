@@ -11,8 +11,8 @@ import pypcfd.plotting as fdplt
 
 if __name__ == "__main__":
     alpha = 0.01
-    Md = 30
-    lagged_samples = 1
+    Md = 25
+    lagged_samples = 0
     """Import Data"""
     X = tepimport.import_sets((0), skip_test=True)[0]
     T10, T11 = tepimport.import_sets((10, 11), skip_training=True)
@@ -37,8 +37,9 @@ if __name__ == "__main__":
     """Train Models"""
     ssfa_object = ssfa.SSFA("chol", "l1")
     paper_ssfa_object = oldssfa.PaperSSFA()
-    W, costs, sparsity, errors = ssfa_object.run(X, Md)
-    W_old, costs_old, sparsity_old, errors_old = paper_ssfa_object.run(X, Md, mu=5)
+    W, costs, sparsity, errors = ssfa_object.run(X, m)
+    results_from_paper = paper_ssfa_object.run(X, m, mu=5)
+    W_old, costs_old, sparsity_old, errors_old = results_from_paper
 
     plt.subplot(3, 1, 1)
     plt.title("Sparsity")
@@ -80,6 +81,12 @@ if __name__ == "__main__":
     Omega_inv_old = np.diag(speeds_old[order_old] ** -1)
     W_old = W_old[:, order_old]
 
+    # Used to normalize Td in the monitoring statistic calculation
+    Lambda_inv_old = np.linalg.pinv(W_old.T@W_old)
+    # Need to recalculate Y_old, since the W_old in the previous step is
+    # already in different order
+    Y_old = W_old.T @ X
+
     tests = [("IDV(10)", T10), ("IDV(11)", T11)]
     n_test = T10.shape[1]
 
@@ -91,10 +98,34 @@ if __name__ == "__main__":
 
         test_stats = fd.calculate_test_stats(Y, Md, Omega_inv)
         test_stats_old = fd.calculate_test_stats(Y_old, Md, Omega_inv_old)
+        # Recalculate Td for the code from the paper
+        for i in range(n_test):
+            test_stats_old[0][i] = Y_old[:Md, i].T @ Lambda_inv_old[:Md, :Md] @ Y_old[:Md, i]
+            test_stats_old[1][i] = Y_old[Md:, i].T @ Lambda_inv_old[Md:, Md:] @ Y_old[Md:, i]
 
         results.append((name, *test_stats, *test_stats_old))
 
     Tdc, Tec, Sdc, Sec = fd.calculate_crit_values(n_test, Md, Me, alpha)
+
+    _f_sparse, axim = plt.subplots(nrows=1, ncols=2, sharey=True)
+    _f_sparse.set_size_inches(8, 6)
+    W_old_sparse = np.zeros_like(W_old)
+    W_sparse = np.zeros_like(W)
+    x_vars = np.diag(np.cov(X))
+    for i in range(W_sparse.shape[0]):
+        for j in range(W_sparse.shape[1]):
+            W_sparse[i, j] = x_vars[i] * W[i, j] / (np.linalg.norm(W[:, j]))
+            W_old_sparse[i, j] = x_vars[i] * W_old[i, j] / (np.linalg.norm(W_old[:, j]))
+
+    axim[0].set_title("Sparsity of SSFA")
+    axim[1].set_title("Sparsity of SSFA-Old")
+    axim[0].imshow(np.abs(W))
+    im = axim[1].imshow(np.abs(W_old))
+    plt.colorbar(im)
+
+    plt.savefig(f"Sparsity_comparison.png", dpi=350)
+    plt.close(fig=_f_sparse)
+    _f_sparse = None
 
     for name, Td, Te, Sd, Se, Td_old, Te_old, Sd_old, Se_old in results:
         _f, axs2d = plt.subplots(nrows=4, ncols=1, sharex=True)
