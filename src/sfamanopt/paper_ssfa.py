@@ -53,11 +53,11 @@ class PaperSSFA:
             P[:, j] = z_to_p @ z_j_optimal
         return(P)
 
-    def overall_cost(self, P: np.ndarray,
-                     R: np.ndarray,
-                     p_to_z: np.ndarray,
-                     Y: np.ndarray,
-                     mu: float):
+    def overall_cost_paper(self, P: np.ndarray,
+                           R: np.ndarray,
+                           p_to_z: np.ndarray,
+                           Y: np.ndarray,
+                           mu: float):
         """Equation 9 from paper"""
         l2_norm = 0
         for i in range(Y.shape[0]):
@@ -69,18 +69,33 @@ class PaperSSFA:
             l1_norm = np.sum(np.abs(p_to_z @ p_j))
         return(l2_norm + mu * l1_norm)
 
+    def overall_cost(self, y: np.ndarray) -> np.ndarray:
+        B = self.derivative_covariance
+        f_y = np.trace(y.T @ B @ y) + np.sum(np.abs(y))
+        return(f_y)
+
+    def convert_P_to_W(self, P: np.ndarray, p_to_z: np.ndarray):
+        W = np.zeros_like(P)
+        for j in range(P.shape[1]):
+            q_j = P[:, j] / np.linalg.norm(P[:, j])
+            W[:, j] = p_to_z @ q_j
+        return(W)
+
     def run(self, X: np.ndarray,
             J: int,
             mu: float = 1,
             P: np.ndarray = None,
             R: np.ndarray = None,
             max_iter: int = 500,
-            err_tol: float = 1e-6):
+            err_tol: float = 1e-6,
+            sparse_pcnt: float = 0.01):
         m, n = X.shape
         D = self.construct_finite_difference_matrix(n)
 
         self.covariance = np.cov(X)
         self.derivative_covariance = np.cov(X @ D)
+        A = self.covariance
+        B = self.derivative_covariance
 
         L, Lambda, LT = np.linalg.svd(self.derivative_covariance)
         """Take J largest singular vectors/values (Same as K from paper)"""
@@ -111,24 +126,35 @@ class PaperSSFA:
         relative_errors = []
         cost_values = []
 
-        cost = self.overall_cost(P, R, p_to_z, Y, mu)
+        W = self.convert_P_to_W(P, p_to_z)
+        cost = self.overall_cost(W)
         for k in range(max_iter):
             """Alternatively optimize P and R"""
             P = self.optimize_p(Y, P, R, p_to_z, z_to_p, X, mu)
             R = self.optimize_r(Y, P)
 
             """Create W matrix to check sparsity criteria"""
-            W = np.zeros((m, J))
-            for j in range(P.shape[1]):
-                q_j = P[:, j] / np.linalg.norm(P[:, j])
-                W[:, j] = p_to_z @ q_j
+            W = self.convert_P_to_W(P, p_to_z)
 
             """Collect information about algorithm performance"""
             prev_cost = cost
-            cost = self.overall_cost(R, P, p_to_z, Y, mu)
+            cost = self.overall_cost(W)
 
             rel_error = abs(cost - prev_cost) / abs(prev_cost)
-            sparsity_values.append(np.count_nonzero(W <= 1e-6) / np.size(W))
+
+            """ Calculate sparsity
+            Since $y_j = \sum_{i=0}^{m} W_{i, j} x_i$, we take sparse values as
+            those that will contribute less than 1% to the norm of the
+            transformation vector. Since Var(x_i) will also affect it's
+            contribution, we also take that into consideration.
+            """
+            s_vals = 0
+            for j in range(W.shape[1]):
+                np.sum(np.abs(W[:, j] * np.diag(self.covariance)))
+                threshold = (sparse_pcnt * np.linalg.norm(W[:, j])
+                             / np.diag(self.covariance))
+                s_vals += np.count_nonzero(W[:, j] <= threshold)
+            sparsity_values.append(s_vals / np.size(W))
             relative_errors.append(rel_error)
             cost_values.append(cost)
             if rel_error < err_tol:
@@ -139,4 +165,5 @@ class PaperSSFA:
         if not converged:
             print(f"Reached max iterations ({max_iter}) without converging, "
                   f"with final relative error of {rel_error}")
+        print(f'Slowest Feature: {np.min(np.diag(W.T @ B @ W))}')
         return(W, cost_values, sparsity_values, relative_errors)
