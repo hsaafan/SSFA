@@ -155,7 +155,7 @@ def plot_test_stats(fig_name: str,
     bot_plot.set_ylabel("$S^2_e$")
     bot_plot.plot(Se_values)
     bot_plot.plot([Se_crit] * len(Se_values))
-    bot_plot.set_xlabel("Variable Index")
+    bot_plot.set_xlabel("Sample")
 
     if show:
         plt.show()
