@@ -71,37 +71,26 @@ class SSFA:
         relative_errors = []
         cost_values = []
         direction = np.ones_like(W)
+        W_prev = np.zeros_like(W)
         for k in range(max_iter):
             # Get direction to move in
             prev_direction = direction
 
             tangent = 2 * B @ W  # Derivative of cost function
-            tangent_norm = np.linalg.norm(tangent)
-            direction = -1 * tangent * eps  # / tangent_norm
+            direction = -1 * tangent * eps
 
             # Proximal minimization followed by manifold optimization
             alpha = self.step_size(k)
+
+            W_prev = W
+            V = W + (k / (k + 3)) * W_prev
+            W = self.retraction(V, A, alpha * direction)
             W = self.proximal_operator(W, eps)
-            W = self.retraction(W, A, alpha * direction)
 
-            # # PGD followed by retraction
-            # W = self.proximal_operator(W - eps * tangent, eps)
-            # W = self.retraction(W, A, np.zeros_like(W))
-
-            # # PGD followed by manifold optimization
-            # alpha = self.step_size(k)
-            # W = self.proximal_operator(W - eps * tangent, eps)
-            # W = self.retraction(W, A, alpha * direction)
-
-            # # Proximal minimization followed by retraction
-            # W = self.proximal_operator(W, eps)
-            # W = self.retraction(W, A, np.zeros_like(W))
-
-            # Calculate objective function and use that to test convergence
-            prev_cost = cost
             cost = self.overall_cost(W)
             # rel_error = abs(cost - prev_cost) / abs(prev_cost)
-            rel_error = np.linalg.norm(direction - prev_direction) / np.linalg.norm(prev_direction)
+            rel_error = (np.linalg.norm(direction - prev_direction)
+                         / np.linalg.norm(prev_direction))
 
             """ Calculate sparsity
             Since $y_j = \sum_{i=0}^{m} W_{i, j} x_i$, we take sparse values as

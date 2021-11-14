@@ -13,21 +13,22 @@ import tepimport
 
 if __name__ == "__main__":
     alpha = 0.01
-    Md = 91
+    Md = 90
     lagged_samples = 2
     fd_method = 'CDC'
-    fd_samples = [i for i in range(150, 170)]  # Contribution plot samples
+    fd_samples = [i for i in range(153, 164)]  # Contribution plot samples
     n_to_plot = 10  # Contribution plot number of variables to plot
+    idv = [4, 5]
     # Linestyles for the n_to_plot variables
     linestyles = ['--s', '--o', '--<', '-->', '--H',
                   ':s', ':o', ':<', ':>', ':H']
     """Import Data"""
     ignored_var = list(range(22, 41))
-    X = tepimport.import_sets([0], skip_test=True)[0][1]
+    X = tepimport.import_sets(0, skip_test=True)[0][1]
     X = tepimport.add_lagged_samples(np.delete(X, ignored_var, axis=0),
                                      lagged_samples)
 
-    test_sets = tepimport.import_sets([4, 5], skip_training=True)
+    test_sets = tepimport.import_sets(idv, skip_training=True)
     tests = []
     for name, data in test_sets:
         data = np.delete(data, ignored_var, axis=0)
@@ -56,15 +57,30 @@ if __name__ == "__main__":
     Omega_inv = np.diag(speeds[order] ** -1)
     W = W[:, order]
 
+    U, Lam, UT = np.linalg.svd(np.cov(X))
+    Q = U @ np.diag(Lam ** -(1/2))
+    Z = Q.T @ X
+    Z_dot = Z[:, 1:] - Z[:, :-1]
+    P, Omega, PT = np.linalg.svd(np.cov(Z_dot))
+    W_orig = Q @ P
+    Omega_inv_orig = np.diag(Omega ** -1)
+
     results = []
     for name, test_data in tests:
         X_test = ((test_data - X_mean) / X_std)
+        X_cont = X_test[:, fd_samples]
         Y = (W.T @ X_test)
-        test_stats = fd.calculate_test_stats(Y, Md, Omega_inv)
-        contributions = fd.calculate_fault_contributions(X_test, W.T,
-                                                         Omega_inv, Md,
-                                                         fd_method)
-        results.append((name, *test_stats, *contributions))
+        stats = fd.calculate_test_stats(Y, Md, Omega_inv)
+        conts = fd.calculate_fault_contributions(X_cont, W.T, Omega_inv,
+                                                 Md, fd_method)
+
+        Y_orig = (W_orig.T @ X_test)
+        stats_orig = fd.calculate_test_stats(Y_orig, Md, Omega_inv_orig)
+        conts_orig = fd.calculate_fault_contributions(X_cont, W_orig.T,
+                                                      Omega_inv_orig,
+                                                      Md, fd_method)
+
+        results.append((name, stats, conts, stats_orig, conts_orig))
 
     Tdc, Tec, Sdc, Sec = fd.calculate_crit_values(n_test, Md, Me, alpha)
 
@@ -109,27 +125,74 @@ if __name__ == "__main__":
             lagged_labels.append(f"{lbl} (t - {i})")
     index_labels += lagged_labels
 
-    for name, Td, Te, Sd, Se, Td_cont, Te_cont, Sd_cont, Se_cont in results:
+    for name, stats, conts, stats_orig, conts_orig in results:
+        """Plot Stats"""
+        _f, axs2d = plt.subplots(nrows=4, ncols=1, sharex=True)
+        _f.set_size_inches(21, 9)
+
+        Td_plot = axs2d[0]
+        Td_plot.set_title(f"{name} Test Statistics")
+        Td_plot.set_ylabel("$T^2_d$")
+        Td_plot.plot(stats[0], label='Manifold Sparse SFA')
+        Td_plot.plot(stats_orig[0], label='SFA')
+        Td_plot.plot([Tdc] * len(stats[0]))
+        Td_plot.legend(loc='upper left')
+
+        Te_plot = axs2d[1]
+        Te_plot.set_ylabel("$T^2_e$")
+        Te_plot.plot(stats[1], label='Manifold Sparse SFA')
+        Te_plot.plot(stats_orig[1], label='SFA')
+        Te_plot.plot([Tec] * len(stats[1]))
+        Te_plot.legend(loc='upper left')
+
+        Sd_plot = axs2d[2]
+        Sd_plot.set_ylabel("$S^2_d$")
+        Sd_plot.plot(stats[2], label='Manifold Sparse SFA')
+        Sd_plot.plot(stats_orig[2], label='SFA')
+        Sd_plot.plot([Sdc] * len(stats[2]))
+        Sd_plot.legend(loc='upper left')
+
+        Se_plot = axs2d[3]
+        Se_plot.set_ylabel("$S^2_e$")
+        Se_plot.plot(stats[3], label='Manifold Sparse SFA')
+        Se_plot.plot(stats_orig[3], label='SFA')
+        Se_plot.plot([Sec] * len(stats[3]))
+        Se_plot.legend(loc='upper left')
+        Se_plot.set_xlabel("Sample")
+
+        plt.savefig(f'plots/CS/{name}_stats.png', dpi=350)
+        plt.close(fig=_f)
+        _f = None
+
+        Td_cont, Te_cont, Sd_cont, Se_cont = conts
+        Td_cont_orig, Te_cont_orig, Sd_cont_orig, Se_cont_orig = conts_orig
         for stat_name, cont in [('Td', Td_cont), ('Te', Te_cont),
-                                ('Sd', Sd_cont), ('Se', Se_cont)]:
-            cont_range = cont[:, fd_samples]
-            largest_cont_over_range = np.max(cont_range, axis=1)
+                                ('Sd', Sd_cont), ('Se', Se_cont),
+                                ('Td_orig', Td_cont_orig),
+                                ('Te_orig', Te_cont_orig),
+                                ('Sd_orig', Sd_cont_orig),
+                                ('Se_orig', Se_cont_orig)]:
+            largest_cont_over_range = np.max(cont, axis=1)
             order = np.argsort(-1 * largest_cont_over_range)
             _f, ax = plt.subplots()
             _f.set_size_inches(16, 9)
+            if stat_name[0] == "S":
+                indices = [i + lagged_samples + 1 for i in fd_samples[:-1]]
+            else:
+                indices = [i + lagged_samples for i in fd_samples]
             for i in range(min(n_to_plot, len(order))):
                 index = order[i]
-                ax.plot(fd_samples,
-                        cont_range[index, :],
+                ax.plot(indices,
+                        cont[index, :],
                         linestyles[i],
                         label=index_labels[index])
             ax.legend(loc='upper left')
             ax.set_xlabel('Sample')
-            ax.set_xticks(fd_samples)
+            ax.set_xticks(indices)
             ax.set_ylabel('Contribution')
             title = (f'{name}: Top {n_to_plot} Contributing Variables to '
                      f'${stat_name[0]}_{stat_name[1]}^2$ For Samples '
-                     f'{fd_samples[0]} - {fd_samples[-1]}')
+                     f'{indices[0]} - {indices[-1]}')
             ax.set_title(title)
             plt.savefig(f'plots/CS/{name}_{stat_name}.png', dpi=350)
             plt.close(fig=_f)

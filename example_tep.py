@@ -8,19 +8,38 @@ import matplotlib.pyplot as plt
 import tepimport
 import pypcfd.plotting as fdplt
 
+
+def diagnosis_to_csv_line(idv: str, sample: int, stat: str, n: int,
+                          contribs: list, labels: list) -> None:
+    order = np.argsort(-1 * contribs[:, sample])
+    ordered_contirbs = contribs[:, sample][order]
+    pcnt_contribs = ordered_contirbs / np.sum(ordered_contirbs)
+    txt_output = f"{idv},{stat},{sample},"
+    for i in range(n):
+        txt_output += f"{labels[order[i]]},{pcnt_contribs[i]*100:.2f},"
+    with open('plots/contribs.csv', 'a') as f:
+        f.write(f"{txt_output[:-1]}\n")
+
+
 if __name__ == "__main__":
     alpha = 0.01
-    Md = 95
-    lagged_samples = 2
-    sample = 500  # Contribution plot sample
+    Md = 20
+    lagged_samples = 0
+    fd_method = 'CDC'
+    fd_samples = []  # Contribution plot samples
     n_to_plot = 5  # Contribution plot number of variables to plot
+    use_original_sfa = True
+    # fd_samples = [(159, 159, 157, 157), (159, 159, 157, 157)]
+    fd_samples = [(161, 161, 160, 160), (161, 161, 160, 160)]
     """Import Data"""
-    X, T0, T4, T5, T10 = tepimport.import_tep_sets(lagged_samples)
+    X, _, _, _, _ = tepimport.import_tep_sets(lagged_samples)
+    test_sets = tepimport.import_sets([4, 5], skip_training=True)
     m = X.shape[0]
     n = X.shape[1]
     X_mean = np.mean(X, axis=1).reshape((-1, 1))
     X = X - X_mean
     X_std = np.std(X, axis=1).reshape((-1, 1))
+    X_std = np.ones_like(X_mean)
     X = X / X_std
     Me = m - Md
 
@@ -36,8 +55,22 @@ if __name__ == "__main__":
     Omega_inv = np.diag(speeds[order] ** -1)
     W = W[:, order]
 
-    n_test = T0.shape[1]
-    tests = [("IDV(0)", T0), ("IDV(4)", T4), ("IDV(5)", T5), ("IDV(10)", T10)]
+    if use_original_sfa:
+        U, Lam, UT = np.linalg.svd(np.cov(X))
+        Q = U @ np.diag(Lam ** -(1/2))
+        Z = Q.T @ X
+        Z_dot = Z[:, 1:] - Z[:, :-1]
+        P, Omega, PT = np.linalg.svd(np.cov(Z_dot))
+        W = Q @ P
+        Omega_inv = np.diag(Omega ** -1)
+
+    ignored_var = list(range(22, 41))
+    tests = []
+    for name, data in test_sets:
+        data = np.delete(data, ignored_var, axis=0)
+        data = tepimport.add_lagged_samples(data, lagged_samples)
+        tests.append((name, data))
+    n_test = tests[0][1].shape[1]
 
     results = []
     for name, test_data in tests:
@@ -45,8 +78,13 @@ if __name__ == "__main__":
         Y = (W.T @ X_test)
         test_stats = fd.calculate_test_stats(Y, Md, Omega_inv)
         contributions = fd.calculate_fault_contributions(X_test, W.T,
-                                                         Omega_inv, Md)
+                                                         Omega_inv, Md,
+                                                         fd_method)
         results.append((name, *test_stats, *contributions))
+        # fd_samples.append((int(np.argmax(test_stats[0])),
+        #                    int(np.argmax(test_stats[1])),
+        #                    int(np.argmax(test_stats[2])),
+        #                    int(np.argmax(test_stats[3]))))
 
     Tdc, Tec, Sdc, Sec = fd.calculate_crit_values(n_test, Md, Me, alpha)
 
@@ -91,32 +129,46 @@ if __name__ == "__main__":
             lagged_labels.append(f"{lbl} (t - {i})")
     index_labels += lagged_labels
 
+    open('plots/contribs.csv', 'w').close()
     for name, Td, Te, Sd, Se, Td_cont, Te_cont, Sd_cont, Se_cont in results:
-        fd.plot_test_stats(f"{name}_stats.png",
+        Td_sample, Te_sample, Sd_sample, Se_sample = fd_samples.pop(0)
+        fd.plot_test_stats(f"plots/{name}_stats.png",
                            f"{name} ($\\alpha$={alpha}, "
                            f"$M_d$={Md}, $M_e$={Me})",
                            Td, Te, Sd, Se, Tdc, Tec, Sdc, Sec)
-        fdplt.plot_contributions(f"{name}_Td_Contributions.png",
-                                 f"$T_d^2$ Contributions Sample {sample}",
-                                 Td_cont[:, sample], n_to_plot, index_labels)
-        fdplt.plot_contributions(f"{name}_Te_Contributions.png",
-                                 f"$T_e^2$ Contributions Sample {sample}",
-                                 Te_cont[:, sample], n_to_plot, index_labels)
-        fdplt.plot_contributions(f"{name}_Sd_Contributions.png",
-                                 f"$S_d^2$ Contributions Sample {sample}",
-                                 Sd_cont[:, sample], n_to_plot, index_labels)
-        fdplt.plot_contributions(f"{name}_Se_Contributions.png",
-                                 f"$S_e^2$ Contributions Sample {sample}",
-                                 Se_cont[:, sample], n_to_plot, index_labels)
+        fdplt.plot_contributions(f"plots/FD/{name}_Td_Contributions.png",
+                                 f"$T_d^2$ Contributions Sample {Td_sample}",
+                                 Td_cont[:, Td_sample],
+                                 n_to_plot,
+                                 index_labels)
+        fdplt.plot_contributions(f"plots/FD/{name}_Te_Contributions.png",
+                                 f"$T_e^2$ Contributions Sample {Te_sample}",
+                                 Te_cont[:, Te_sample],
+                                 n_to_plot,
+                                 index_labels)
+        fdplt.plot_contributions(f"plots/FD/{name}_Sd_Contributions.png",
+                                 f"$S_d^2$ Contributions Sample {Sd_sample}",
+                                 Sd_cont[:, Sd_sample],
+                                 n_to_plot,
+                                 index_labels)
+        fdplt.plot_contributions(f"plots/FD/{name}_Se_Contributions.png",
+                                 f"$S_e^2$ Contributions Sample {Se_sample}",
+                                 Se_cont[:, Se_sample],
+                                 n_to_plot,
+                                 index_labels)
+        diagnosis_to_csv_line(name, Td_sample, 'Td', 5, Td_cont, index_labels)
+        diagnosis_to_csv_line(name, Te_sample, 'Te', 5, Te_cont, index_labels)
+        diagnosis_to_csv_line(name, Sd_sample, 'Sd', 5, Sd_cont, index_labels)
+        diagnosis_to_csv_line(name, Se_sample, 'Se', 5, Se_cont, index_labels)
 
     plt.figure()
-    plt.subplot(2, 1, 1)
+    # plt.subplot(2, 1, 1)
     plt.plot(speeds[order])
     plt.ylabel("Feature Speed")
-    plt.subplot(2, 1, 2)
-    plt.plot([np.count_nonzero(W[:, i] == 0) for i in range(m)])
     plt.xlabel("Slow Features")
-    plt.ylabel("Number of zero values")
+    # plt.subplot(2, 1, 2)
+    # plt.plot([np.count_nonzero(W[:, i] == 0) for i in range(m)])
+    # plt.ylabel("Number of zero values")
 
     plt.figure()
     plt.subplot(3, 1, 1)
@@ -131,6 +183,10 @@ if __name__ == "__main__":
     plt.plot(cost_values)
     plt.yscale('log')
 
-    print(W)
-    print(f'0 values of W: {np.count_nonzero(W==0)} / {np.size(W)}')
+    plt.figure()
+    plt.imshow(np.abs(W.T))
+    plt.colorbar()
+
+    sparse_W_vals = int(sparsity_values[-1] * np.size(W))
+    print(f'0 values of W: {sparse_W_vals} / {np.size(W)}')
     plt.show()

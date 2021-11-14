@@ -3,16 +3,17 @@ import src.sfamanopt.paper_ssfa as oldssfa
 import src.sfamanopt.fault_diagnosis as fd
 
 import numpy as np
-import scipy.stats as stats
 import matplotlib.pyplot as plt
 
 import tepimport
-import pypcfd.plotting as fdplt
 
 if __name__ == "__main__":
     alpha = 0.01
-    Md = 25
-    lagged_samples = 0
+    Md = 30
+    lagged_samples = 1
+    # Algorithm names for labels
+    us = "Manifold Sparse SFA"
+    them = "Sparse SFA"
     """Import Data"""
     X = tepimport.import_sets((0), skip_test=True)[0]
     T10, T11 = tepimport.import_sets((10, 11), skip_training=True)
@@ -31,36 +32,37 @@ if __name__ == "__main__":
     X_mean = np.mean(X, axis=1).reshape((-1, 1))
     X = X - X_mean
     X_std = np.std(X, axis=1).reshape((-1, 1))
+    # X_std = np.ones_like(X_mean)
     X = X / X_std
     Me = m - Md
 
     """Train Models"""
     ssfa_object = ssfa.SSFA("chol", "l1")
     paper_ssfa_object = oldssfa.PaperSSFA()
-    W, costs, sparsity, errors = ssfa_object.run(X, m)
-    results_from_paper = paper_ssfa_object.run(X, m, mu=5)
+    W, costs, sparsity, errors = ssfa_object.run(X, Md)
+    results_from_paper = paper_ssfa_object.run(X, Md, mu=5)
     W_old, costs_old, sparsity_old, errors_old = results_from_paper
 
     plt.subplot(3, 1, 1)
     plt.title("Sparsity")
-    plt.plot(sparsity, label='ours')
-    plt.plot(sparsity_old, label='paper')
+    plt.plot(sparsity, label=us)
+    plt.plot(sparsity_old, label=them)
     plt.xlabel("Iteration")
     plt.ylabel("Sparsity")
     plt.legend(loc='upper right')
 
     plt.subplot(3, 1, 2)
     plt.title("Costs")
-    plt.plot(np.asarray(costs) - np.min(costs), label='ours')
-    plt.plot(np.asarray(costs_old) - np.min(costs_old), label='paper')
+    plt.plot(np.asarray(costs) - np.min(costs), label=us)
+    plt.plot(np.asarray(costs_old) - np.min(costs_old), label=them)
     plt.xlabel("Iteration")
     plt.ylabel("Cost (Shifted to 0 at minimum)")
     plt.legend(loc='upper right')
 
     plt.subplot(3, 1, 3)
     plt.title("Relative Error")
-    plt.plot(errors[2:], label='ours')
-    plt.plot(errors_old[2:], label='paper')
+    plt.plot(errors[2:], label=us)
+    plt.plot(errors_old[2:], label=them)
     plt.xlabel("Iteration")
     plt.ylabel("Relative Error")
     plt.legend(loc='upper right')
@@ -100,8 +102,10 @@ if __name__ == "__main__":
         test_stats_old = fd.calculate_test_stats(Y_old, Md, Omega_inv_old)
         # Recalculate Td for the code from the paper
         for i in range(n_test):
-            test_stats_old[0][i] = Y_old[:Md, i].T @ Lambda_inv_old[:Md, :Md] @ Y_old[:Md, i]
-            test_stats_old[1][i] = Y_old[Md:, i].T @ Lambda_inv_old[Md:, Md:] @ Y_old[Md:, i]
+            test_stats_old[0][i] = (Y_old[:Md, i].T @ Lambda_inv_old[:Md, :Md]
+                                    @ Y_old[:Md, i])
+            test_stats_old[1][i] = (Y_old[Md:, i].T @ Lambda_inv_old[Md:, Md:]
+                                    @ Y_old[Md:, i])
 
         results.append((name, *test_stats, *test_stats_old))
 
@@ -114,13 +118,18 @@ if __name__ == "__main__":
     x_vars = np.diag(np.cov(X))
     for i in range(W_sparse.shape[0]):
         for j in range(W_sparse.shape[1]):
-            W_sparse[i, j] = x_vars[i] * W[i, j] / (np.linalg.norm(W[:, j]))
-            W_old_sparse[i, j] = x_vars[i] * W_old[i, j] / (np.linalg.norm(W_old[:, j]))
+            W_sparse[i, j] = x_vars[i] * W[i, j] / (np.linalg.norm(W[:, j] * x_vars))
+            W_old_sparse[i, j] = (x_vars[i] * W_old[i, j]
+                                  / (np.linalg.norm(W_old[:, j] * x_vars)))
 
     axim[0].set_title("Sparsity of SSFA")
     axim[1].set_title("Sparsity of SSFA-Old")
-    axim[0].imshow(np.abs(W))
-    im = axim[1].imshow(np.abs(W_old))
+    W_im = np.abs(np.copy(W_sparse))
+    W_im[W_im < 0.01] = np.NaN
+    W_im_old = np.abs(np.copy(W_old_sparse))
+    W_im_old[W_im_old < 0.01] = np.NaN
+    axim[0].imshow(np.abs(W_im))
+    im = axim[1].imshow(np.abs(W_im_old))
     plt.colorbar(im)
 
     plt.savefig(f"Sparsity_comparison.png", dpi=350)
@@ -128,38 +137,38 @@ if __name__ == "__main__":
     _f_sparse = None
 
     for name, Td, Te, Sd, Se, Td_old, Te_old, Sd_old, Se_old in results:
-        _f, axs2d = plt.subplots(nrows=4, ncols=1, sharex=True)
+        _f, axs2d = plt.subplots(nrows=2, ncols=1, sharex=True)
         _f.set_size_inches(8, 6)
 
         Td_plot = axs2d[0]
         Td_plot.set_title(f"{name} SSFA Comparison")
         Td_plot.set_ylabel("$T^2_d$")
-        Td_plot.plot(Td, label='Ours')
-        Td_plot.plot(Td_old, label='Paper')
+        Td_plot.plot(Td, label=us)
+        Td_plot.plot(Td_old, label=them)
         Td_plot.plot([Tdc] * len(Td))
         Td_plot.legend(loc='upper right')
 
-        Te_plot = axs2d[1]
-        Te_plot.set_ylabel("$T^2_e$")
-        Te_plot.plot(Te, label='Ours')
-        Te_plot.plot(Te_old, label='Paper')
-        Te_plot.plot([Tec] * len(Te))
-        Te_plot.legend(loc='upper right')
+        # Te_plot = axs2d[1]
+        # Te_plot.set_ylabel("$T^2_e$")
+        # Te_plot.plot(Te, label=us)
+        # Te_plot.plot(Te_old, label=them)
+        # Te_plot.plot([Tec] * len(Te))
+        # Te_plot.legend(loc='upper right')
 
-        Sd_plot = axs2d[2]
+        Sd_plot = axs2d[1]
         Sd_plot.set_ylabel("$S^2_d$")
-        Sd_plot.plot(Sd, label='Ours')
-        Sd_plot.plot(Sd_old, label='Paper')
+        Sd_plot.plot(Sd, label=us)
+        Sd_plot.plot(Sd_old, label=them)
         Sd_plot.plot([Sdc] * len(Se))
         Sd_plot.legend(loc='upper right')
 
-        bot_plot = axs2d[3]
-        bot_plot.set_ylabel("$S^2_e$")
-        bot_plot.plot(Se, label='Ours')
-        bot_plot.plot(Se_old, label='Paper')
-        bot_plot.plot([Sec] * len(Se))
-        bot_plot.set_xlabel("Variable Index")
-        bot_plot.legend(loc='upper right')
+        # bot_plot = axs2d[3]
+        # bot_plot.set_ylabel("$S^2_e$")
+        # bot_plot.plot(Se, label=us)
+        # bot_plot.plot(Se_old, label=them)
+        # bot_plot.plot([Sec] * len(Se))
+        # bot_plot.set_xlabel("Variable Index")
+        # bot_plot.legend(loc='upper right')
 
         plt.savefig(f"{name}_comparison.png", dpi=350)
         plt.close(fig=_f)
