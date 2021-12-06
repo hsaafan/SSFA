@@ -9,9 +9,10 @@ import tepimport
 
 if __name__ == "__main__":
     alpha = 0.01
-    J = 33  # How many to calculate
+    J = 55  # How many to calculate
     lagged_samples = 2
-    thresholds = [0, 0.01, 0.001, 1e-6, 1e-12]
+    thresholds = [10 ** (-x) for x in range(13)]
+    thresholds.append(0)
     """Import Data"""
     X = tepimport.import_sets((0), skip_test=True)[0]
 
@@ -61,15 +62,73 @@ if __name__ == "__main__":
     W_old = W_old[:, order_old]
 
     """Sparsity Calculation"""
-    W_sparse = np.zeros_like(W)
-    W_old_sparse = np.zeros_like(W_old)
-    W_orig_sparse = np.zeros_like(W_orig)
+    W_sparse = np.abs(W) / np.abs(W).sum(axis=0, keepdims=1)
+    W_old_sparse = np.abs(W_old) / np.abs(W_old).sum(axis=0, keepdims=1)
+    W_orig_sparse = np.abs(W_orig) / np.abs(W_orig).sum(axis=0, keepdims=1)
 
-    for i in range(W_sparse.shape[0]):
-        for j in range(W_sparse.shape[1]):
-            W_sparse[i, j] = W[i, j] / np.linalg.norm(W[:, j])
-            W_old_sparse[i, j] = W_old[i, j] / np.linalg.norm(W_old[:, j])
-            W_orig_sparse[i, j] = W_orig[i, j] / np.linalg.norm(W_orig[:, j])
+    # for i in range(W_sparse.shape[0]):
+    #     for j in range(W_sparse.shape[1]):
+    #         W_sparse[i, j] = W[i, j] / np.linalg.norm(W[:, j])
+    #         W_old_sparse[i, j] = W_old[i, j] / np.linalg.norm(W_old[:, j])
+    #         W_orig_sparse[i, j] = W_orig[i, j] / np.linalg.norm(W_orig[:, j])
+
+    """Print Slowest Feature"""
+    index_labels = [
+        "XMEAS(01) A Feed  (stream 1) kscmh",
+        "XMEAS(02) D Feed  (stream 2) kg/hr",
+        "XMEAS(03) E Feed  (stream 3) kg/hr",
+        "XMEAS(04) A and C Feed  (stream 4) kscmh",
+        "XMEAS(05) Recycle Flow  (stream 8) kscmh",
+        "XMEAS(06) Reactor Feed Rate  (stream 6) kscmh",
+        "XMEAS(07) Reactor Pressure kPa gauge",
+        "XMEAS(08) Reactor Level %",
+        "XMEAS(09) Reactor Temperature Deg C",
+        "XMEAS(10) Purge Rate (stream 9) kscmh",
+        "XMEAS(11) Product Sep Temp Deg C",
+        "XMEAS(12) Product Sep Level %",
+        "XMEAS(13) Prod Sep Pressure kPa gauge",
+        "XMEAS(14) Prod Sep Underflow (stream 10) m3/hr",
+        "XMEAS(15) Stripper Level %",
+        "XMEAS(16) Stripper Pressure kPa gauge",
+        "XMEAS(17) Stripper Underflow (stream 11) m3/hr",
+        "XMEAS(18) Stripper Temperature Deg C",
+        "XMEAS(19) Stripper Steam Flow kg/hr",
+        "XMEAS(20) Compressor Work kW",
+        "XMEAS(21) Reactor Cooling Water Outlet Temp Deg C",
+        "XMEAS(22) Separator Cooling Water Outlet Temp Deg C",
+        "XMV(01) D Feed Flow (stream 2)",
+        "XMV(02) E Feed Flow (stream 3)",
+        "XMV(03) A Feed Flow (stream 1)",
+        "XMV(04) A and C Feed Flow (stream 4)",
+        "XMV(05) Compressor Recycle Valve",
+        "XMV(06) Purge Valve (stream 9)",
+        "XMV(07) Separator Pot Liquid Flow (stream 10)",
+        "XMV(08) Stripper Liquid Product Flow (stream 11)",
+        "XMV(09) Stripper Steam Valve",
+        "XMV(10) Reactor Cooling Water Flow",
+        "XMV(11) Condenser Cooling Water Flow",
+    ]
+    lagged_labels = []
+    for i in range(1, lagged_samples + 1):
+        for lbl in index_labels:
+            lagged_labels.append(f"{lbl} (t - {i})")
+    index_labels += lagged_labels
+
+    slowest = np.argsort(-1 * np.abs(W_sparse[:, 0]))
+    slowest_old = np.argsort(-1 * np.abs(W_old_sparse[:, 0]))
+    slowest_orig = np.argsort(-1 * np.abs(W_orig_sparse[:, 0]))
+    print("Manifold Sparse SFA")
+    for i in range(10):
+        print(index_labels[slowest[i]],
+              abs(W_sparse[:, 0][slowest[i]]))
+    print("Sparse SFA")
+    for i in range(10):
+        print(index_labels[slowest_old[i]],
+              abs(W_old_sparse[:, 0][slowest_old[i]]))
+    print("SFA")
+    for i in range(10):
+        print(index_labels[slowest_orig[i]],
+              abs(W_orig_sparse[:, 0][slowest_orig[i]]))
 
     """Sparsity Plot"""
     for threshold in thresholds:

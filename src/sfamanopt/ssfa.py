@@ -62,8 +62,8 @@ class SSFA:
         self.derivative_covariance = B
 
         if W is None:
-            W = np.ones((m, J)) + np.eye(m, J)  # Initial guess
-            # W = np.eye(m, J)
+            # W = np.ones((m, J)) + np.eye(m, J)  # Initial guess
+            W = np.eye(m, J)
 
         converged = False
         cost = self.overall_cost(W)
@@ -82,15 +82,16 @@ class SSFA:
             # Proximal minimization followed by manifold optimization
             alpha = self.step_size(k)
 
+            V = W + (k / (k + 3)) * (W - W_prev)
             W_prev = W
-            V = W + (k / (k + 3)) * W_prev
             W = self.retraction(V, A, alpha * direction)
             W = self.proximal_operator(W, eps)
 
             cost = self.overall_cost(W)
             # rel_error = abs(cost - prev_cost) / abs(prev_cost)
-            rel_error = (np.linalg.norm(direction - prev_direction)
-                         / np.linalg.norm(prev_direction))
+            # rel_error = (np.linalg.norm(direction - prev_direction)
+            #              / np.linalg.norm(prev_direction))
+            rel_error = (np.linalg.norm(W - W_prev) / np.linalg.norm(W_prev))
 
             """ Calculate sparsity
             Since $y_j = \sum_{i=0}^{m} W_{i, j} x_i$, we take sparse values as

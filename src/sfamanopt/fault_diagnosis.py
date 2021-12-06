@@ -32,13 +32,17 @@ def calculate_crit_values(n: int,
     if alpha > 1 or alpha < 0:
         raise ValueError("Confidence level should be between 0 and 1")
     p = 1 - alpha
+    hd = (Md * (n - 1) * (n + 1)) / (n * (n - Md))
+    he = (Me * (n - 1) * (n + 1)) / (n * (n - Me))
     gd = (Md*(n**2-2*n))/((n-1)*(n-Md-1))
     ge = (Me*(n**2-2*n))/((n-1)*(n-Me-1))
 
-    T_d_crit = stats.chi2.ppf(p, Md)
-    T_e_crit = stats.chi2.ppf(p, Me)
-    S_d_crit = gd*stats.f.ppf(p, Md, n-Md-1)
-    S_e_crit = ge*stats.f.ppf(p, Me, n-Me-1)
+    # T_d_crit = stats.chi2.ppf(p, Md)
+    # T_e_crit = stats.chi2.ppf(p, Me)
+    T_d_crit = hd * stats.f.ppf(p, Md, n-Md)
+    T_e_crit = he * stats.f.ppf(p, Me, n-Me)
+    S_d_crit = gd * stats.f.ppf(p, Md, n-Md-1)
+    S_e_crit = ge * stats.f.ppf(p, Me, n-Me-1)
 
     return(T_d_crit, T_e_crit, S_d_crit, S_e_crit)
 
