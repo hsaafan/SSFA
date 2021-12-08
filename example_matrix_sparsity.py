@@ -1,15 +1,16 @@
+import src.sfamanopt.mssfa as mssfa
 import src.sfamanopt.ssfa as ssfa
-import src.sfamanopt.paper_ssfa as oldssfa
-import src.sfamanopt.fault_diagnosis as fd
+import src.sfamanopt.sfa as methods
 
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.decomposition import SparsePCA
 
 import tepimport
 
 if __name__ == "__main__":
     alpha = 0.01
-    J = 55  # How many to calculate
+    Md = 55  # How many to calculate
     lagged_samples = 2
     thresholds = [10 ** (-x) for x in range(13)]
     thresholds.append(0)
@@ -29,48 +30,28 @@ if __name__ == "__main__":
     X = X / X_std
 
     """Train Models"""
-    # Ours
-    ssfa_object = ssfa.SSFA("chol", "l1")
-    W, _, _, _ = ssfa_object.run(X, J)
+    sfa_object = methods.SFA()
+    W_sfa, Omega_inv_sfa = sfa_object.run(X, Md)
 
-    # Other sparse
-    paper_ssfa_object = oldssfa.PaperSSFA()
-    W_old, _, _, _ = paper_ssfa_object.run(X, J, mu=5)
+    ssfa_object = ssfa.SSFA()
+    W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md)
+    Lambda_inv_ssfa = np.linalg.pinv(W_ssfa.T @ W_ssfa)
 
-    # Original
-    U, Lam, UT = np.linalg.svd(np.cov(X))
-    Q = U @ np.diag(Lam ** -(1/2))
-    Z = Q.T @ X
-    Z_dot = Z[:, 1:] - Z[:, :-1]
-    P, Omega, PT = np.linalg.svd(np.cov(Z_dot))
-    P = np.flip(P, axis=1)
-    W_orig = (Q @ P)[:, :J]
+    spca = SparsePCA(n_components=Md, max_iter=500, tol=1e-6)
+    T = spca.fit_transform(X.T)
+    P_spca = spca.components_.T
+    print(f"SPCA converged in {spca.n_iter_} iterations")
+    Lambda_spca = np.cov(T.T)
+    Lambda_inv_spca = np.diag(np.diag(Lambda_spca) ** -1)
 
-    """Order Features and take slowest subset"""
-    Y = W.T @ X
-    Y_dot = Y[:, 1:] - Y[:, :-1]
-    speeds = np.diag(Y_dot @ Y_dot.T) / n
-    order = np.argsort(speeds)
-    Omega_inv = np.diag(speeds[order] ** -1)
-    W = W[:, order]
-
-    Y_old = W_old.T @ X
-    Y_dot_old = Y_old[:, 1:] - Y_old[:, :-1]
-    speeds_old = np.diag(Y_dot_old @ Y_dot_old.T) / n
-    order_old = np.argsort(speeds_old)
-    Omega_inv_old = np.diag(speeds_old[order_old] ** -1)
-    W_old = W_old[:, order_old]
+    mssfa_object = mssfa.MSSFA("chol", "l1")
+    W_mssfa, Omega_inv_mssfa, _, _, _ = mssfa_object.run(X, Md)
 
     """Sparsity Calculation"""
-    W_sparse = np.abs(W) / np.abs(W).sum(axis=0, keepdims=1)
-    W_old_sparse = np.abs(W_old) / np.abs(W_old).sum(axis=0, keepdims=1)
-    W_orig_sparse = np.abs(W_orig) / np.abs(W_orig).sum(axis=0, keepdims=1)
-
-    # for i in range(W_sparse.shape[0]):
-    #     for j in range(W_sparse.shape[1]):
-    #         W_sparse[i, j] = W[i, j] / np.linalg.norm(W[:, j])
-    #         W_old_sparse[i, j] = W_old[i, j] / np.linalg.norm(W_old[:, j])
-    #         W_orig_sparse[i, j] = W_orig[i, j] / np.linalg.norm(W_orig[:, j])
+    sfa_sparse = np.abs(W_sfa) / np.abs(W_sfa).sum(axis=0, keepdims=1)
+    ssfa_sparse = np.abs(W_ssfa) / np.abs(W_ssfa).sum(axis=0, keepdims=1)
+    spca_sparse = np.abs(P_spca) / np.abs(P_spca).sum(axis=0, keepdims=1)
+    mssfa_sparse = np.abs(W_mssfa) / np.abs(W_mssfa).sum(axis=0, keepdims=1)
 
     """Print Slowest Feature"""
     index_labels = [
@@ -114,60 +95,72 @@ if __name__ == "__main__":
             lagged_labels.append(f"{lbl} (t - {i})")
     index_labels += lagged_labels
 
-    slowest = np.argsort(-1 * np.abs(W_sparse[:, 0]))
-    slowest_old = np.argsort(-1 * np.abs(W_old_sparse[:, 0]))
-    slowest_orig = np.argsort(-1 * np.abs(W_orig_sparse[:, 0]))
-    print("Manifold Sparse SFA")
-    for i in range(10):
-        print(index_labels[slowest[i]],
-              abs(W_sparse[:, 0][slowest[i]]))
-    print("Sparse SFA")
-    for i in range(10):
-        print(index_labels[slowest_old[i]],
-              abs(W_old_sparse[:, 0][slowest_old[i]]))
+    sfa_slowest = np.argsort(-1 * np.abs(sfa_sparse[:, 0]))
+    ssfa_slowest = np.argsort(-1 * np.abs(ssfa_sparse[:, 0]))
+    spca_slowest = np.argsort(-1 * np.abs(spca_sparse[:, 0]))
+    mssfa_slowest = np.argsort(-1 * np.abs(mssfa_sparse[:, 0]))
     print("SFA")
     for i in range(10):
-        print(index_labels[slowest_orig[i]],
-              abs(W_orig_sparse[:, 0][slowest_orig[i]]))
+        print(index_labels[sfa_slowest[i]],
+              sfa_sparse[:, 0][sfa_slowest[i]])
+    print("Sparse SFA")
+    for i in range(10):
+        print(index_labels[ssfa_slowest[i]],
+              ssfa_sparse[:, 0][ssfa_slowest[i]])
+    print("Sparse PCA")
+    for i in range(10):
+        print(index_labels[spca_slowest[i]],
+              spca_sparse[:, 0][spca_slowest[i]])
+    print("Manifold Sparse SFA")
+    for i in range(10):
+        print(index_labels[mssfa_slowest[i]],
+              mssfa_sparse[:, 0][mssfa_slowest[i]])
 
     """Sparsity Plot"""
     for threshold in thresholds:
-        _f_sparse, axim = plt.subplots(nrows=1, ncols=3, sharey=True)
+        _f_sparse, axim = plt.subplots(nrows=1, ncols=4, sharey=True)
         _f_sparse.set_size_inches(21, 9)
 
-        W_im = np.abs(np.copy(W_sparse))
-        W_im_old = np.abs(np.copy(W_old_sparse))
-        W_im_orig = np.abs(np.copy(W_orig_sparse))
+        im_sfa = np.abs(np.copy(sfa_sparse))
+        im_ssfa = np.abs(np.copy(ssfa_sparse))
+        im_spca = np.abs(np.copy(spca_sparse))
+        im_mssfa = np.abs(np.copy(mssfa_sparse))
 
-        W_im[W_im <= threshold] = np.NaN
-        W_im_old[W_im_old <= threshold] = np.NaN
-        W_im_orig[W_im_orig <= threshold] = np.NaN
+        im_sfa[im_sfa <= threshold] = np.NaN
+        im_ssfa[im_ssfa <= threshold] = np.NaN
+        im_spca[im_spca <= threshold] = np.NaN
+        im_mssfa[im_mssfa <= threshold] = np.NaN
 
-        s_pcnt = np.count_nonzero(np.isnan(W_im)) / np.size(W_im)
-        s_pcnt_old = np.count_nonzero(np.isnan(W_im_old)) / np.size(W_im_old)
-        s_pcnt_orig = np.count_nonzero(np.isnan(W_im_orig))/np.size(W_im_orig)
-        axim[0].set_title(f"SFA ({s_pcnt_orig:.3f})")
-        axim[1].set_title(f"Sparse SFA ({s_pcnt_old:.3f})")
-        axim[2].set_title(f"Manifold Sparse SFA ({s_pcnt:.3f})")
+        sfa_S = np.count_nonzero(np.isnan(im_sfa)) / np.size(im_sfa)
+        ssfa_S = np.count_nonzero(np.isnan(im_ssfa)) / np.size(im_ssfa)
+        spca_S = np.count_nonzero(np.isnan(im_spca)) / np.size(im_spca)
+        mssfa_S = np.count_nonzero(np.isnan(im_mssfa))/np.size(im_mssfa)
+        axim[0].set_title(f"SFA ({sfa_S:.3f})")
+        axim[1].set_title(f"Sparse SFA ({ssfa_S:.3f})")
+        axim[2].set_title(f"Sparse PCA ({spca_S:.3f})")
+        axim[3].set_title(f"Manifold Sparse SFA ({mssfa_S:.3f})")
 
-        axim[0].imshow(np.abs(W_im_orig))
-        axim[1].imshow(np.abs(W_im_old))
-        im = axim[2].imshow(np.abs(W_im))
+        axim[0].imshow(np.abs(im_sfa))
+        axim[1].imshow(np.abs(im_ssfa))
+        axim[2].imshow(np.abs(im_spca))
+        im = axim[3].imshow(np.abs(im_mssfa))
 
         axim[0].set_ylabel("Input Signal")
         axim[0].set_xlabel("Feature")
         axim[1].set_xlabel("Feature")
-        axim[2].set_xlabel("Feature")
+        axim[2].set_xlabel("Component")
+        axim[3].set_xlabel("Feature")
 
         _f_sparse.colorbar(im, ax=axim, aspect=60)
 
         if threshold == 0:
             magnitude = 0
-            _f_sparse.text(0.2, 0.95, f'J = {J} | Threshold = 0', fontsize=24)
+            _f_sparse.text(0.2, 0.95, f'J = {Md} | Threshold = 0', fontsize=24)
         else:
             magnitude = int(np.abs(np.floor(np.log10(threshold))))
-            _f_sparse.text(0.2, 0.95, f'J = {J} | Threshold = 1e-{magnitude}',
+            _f_sparse.text(0.2, 0.95, f'J = {Md} | Threshold = 1e-{magnitude}',
                            fontsize=24)
-        plt.savefig(f"plots/Sparsity_comparison_{magnitude}.png", dpi=350)
+        plt.savefig(f"plots/Sparsity/Sparsity_comparison_{magnitude}.png",
+                    dpi=350)
         plt.close(fig=_f_sparse)
         _f_sparse = None

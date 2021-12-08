@@ -1,5 +1,5 @@
+import src.sfamanopt.mssfa as mssfa
 import src.sfamanopt.ssfa as ssfa
-import src.sfamanopt.paper_ssfa as oldssfa
 import src.sfamanopt.fault_diagnosis as fd
 
 import numpy as np
@@ -9,11 +9,9 @@ import tepimport
 
 if __name__ == "__main__":
     alpha = 0.01
-    Md = 90
+    Md = 55
     lagged_samples = 2
     # Algorithm names for labels
-    us = "Manifold Sparse SFA"
-    them = "Sparse SFA"
     """Import Data"""
     X = tepimport.import_sets((0), skip_test=True)[0]
     T = tepimport.import_sets((4), skip_training=True)[0]
@@ -34,36 +32,35 @@ if __name__ == "__main__":
     Me = m - Md
 
     """Train Models"""
-    ssfa_object = ssfa.SSFA("chol", "l1")
-    paper_ssfa_object = oldssfa.PaperSSFA()
-    W, _, _, _ = ssfa_object.run(X, Md)
-    W_norm, _, _, _ = ssfa_object.run(X_norm, Md)
-    W_old, _, _, _ = paper_ssfa_object.run(X, Md, mu=5)
-    W_old_norm, _, _, _ = paper_ssfa_object.run(X_norm, Md, mu=5)
+    ssfa_object = ssfa.SSFA()
+    W_ssfa, _, _, _, _ = ssfa_object.run(X, Md)
+    W_ssfa_norm, _, _, _, _ = ssfa_object.run(X_norm, Md)
+    Lambda_inv_ssfa = np.linalg.pinv(W_ssfa.T @ W_ssfa)
+    Lambda_inv_ssfa_norm = np.linalg.pinv(W_ssfa_norm.T @ W_ssfa_norm)
 
-    # Used to normalize Td in the monitoring statistic calculation
-    Lambda_inv_old = np.linalg.pinv(W_old.T @ W_old)
-    Lambda_inv_old_norm = np.linalg.pinv(W_old_norm.T @ W_old_norm)
+    mssfa_object = mssfa.MSSFA("chol", "l1")
+    W_mssfa, _, _, _, _ = mssfa_object.run(X, Md)
+    W_mssfa_norm, _, _, _, _ = mssfa_object.run(X_norm, Md)
 
     """Test data"""
     n_test = T.shape[1]
     X_test = T - X_mean
     X_test_norm = (T - X_mean) / X_std
 
-    Y = W.T @ X_test
-    Y_norm = W_norm.T @ X_test_norm
+    Y_ssfa = W_ssfa.T @ X_test
+    Y_ssfa_norm = W_ssfa_norm.T @ X_test_norm
 
-    Y_old = W_old.T @ X_test
-    Y_old_norm = W_old_norm.T @ X_test_norm
+    Y_mssfa = W_mssfa.T @ X_test
+    Y_mssfa_norm = W_mssfa_norm.T @ X_test_norm
 
     # Calculate T^2 for the code from the paper
     T_sqr = np.zeros((4, n_test))
     for i in range(n_test):
-        T_sqr[0, i] = Y[:, i].T @ Y[:, i]
-        T_sqr[1, i] = Y_norm[:, i].T @ Y_norm[:, i]
-        T_sqr[2, i] = Y_old[:, i].T @ Lambda_inv_old @ Y_old[:, i]
-        T_sqr[3, i] = (Y_old_norm[:, i].T @ Lambda_inv_old_norm
-                       @ Y_old_norm[:, i])
+        T_sqr[0, i] = Y_ssfa[:, i].T @ Lambda_inv_ssfa @ Y_ssfa[:, i]
+        T_sqr[1, i] = (Y_ssfa_norm[:, i].T @ Lambda_inv_ssfa_norm
+                       @ Y_ssfa_norm[:, i])
+        T_sqr[2, i] = Y_mssfa[:, i].T @ Y_mssfa[:, i]
+        T_sqr[3, i] = Y_mssfa_norm[:, i].T @ Y_mssfa_norm[:, i]
 
     Tdc, Tec, Sdc, Sec = fd.calculate_crit_values(n_test, Md, Me, alpha)
 
@@ -72,25 +69,25 @@ if __name__ == "__main__":
     _f.set_size_inches(21, 9)
     fontsize = 24
 
-    us = axs2d[0][0]
-    us.set_title(f"Unnormalized Inputs", fontsize=fontsize)
-    us.set_ylabel("Manifold Sparse SFA $T^2$", fontsize=fontsize)
-    us.plot(T_sqr[0, :])
+    mssfa_plot = axs2d[0][0]
+    mssfa_plot.set_title(f"Unnormalized Inputs", fontsize=fontsize)
+    mssfa_plot.set_ylabel("Sparse SFA $T^2$", fontsize=fontsize)
+    mssfa_plot.plot(T_sqr[0, :])
 
-    us_norm = axs2d[0][1]
-    us_norm.set_title(f"Normalized Inputs", fontsize=fontsize)
-    us_norm.plot(T_sqr[1, :])
+    mssfa_plot_norm = axs2d[0][1]
+    mssfa_plot_norm.set_title(f"Normalized Inputs", fontsize=fontsize)
+    mssfa_plot_norm.plot(T_sqr[1, :])
 
-    them = axs2d[1][0]
-    them.set_ylabel("Sparse SFA $T^2$", fontsize=fontsize)
-    them.set_xlabel("Sample", fontsize=fontsize)
-    them.plot(T_sqr[2, :])
+    ssfa_plot = axs2d[1][0]
+    ssfa_plot.set_ylabel("Manifold Sparse SFA $T^2$", fontsize=fontsize)
+    ssfa_plot.set_xlabel("Sample", fontsize=fontsize)
+    ssfa_plot.plot(T_sqr[2, :])
 
-    them_norm = axs2d[1][1]
-    them_norm.set_xlabel("Sample", fontsize=fontsize)
-    them_norm.plot(T_sqr[3, :])
+    ssfa_plot_norm = axs2d[1][1]
+    ssfa_plot_norm.set_xlabel("Sample", fontsize=fontsize)
+    ssfa_plot_norm.plot(T_sqr[3, :])
 
     _f.set_tight_layout(True)
-    plt.savefig(f"Normalized_comparison.png", dpi=350)
+    plt.savefig(f"plots/normalized_comparison.png", dpi=350)
     plt.close(fig=_f)
     _f = None

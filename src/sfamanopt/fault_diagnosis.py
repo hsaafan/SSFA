@@ -15,6 +15,12 @@ def calculate_crit_values(n: int,
 
     Parameters
     ----------
+    n: int
+        Number of training samples
+    Md: int
+        Number of slow features
+    Me: int
+        Number of fast features
     alpha: float
         The confidence level to use for the critical values
 
@@ -45,6 +51,51 @@ def calculate_crit_values(n: int,
     S_e_crit = ge * stats.f.ppf(p, Me, n-Me-1)
 
     return(T_d_crit, T_e_crit, S_d_crit, S_e_crit)
+
+
+def calculate_Q_crit(Lambda_d: np.ndarray, Lambda_e: np.ndarray,
+                     alpha: float = 0.01) -> float:
+    """ Calculate critical values for monitoring
+
+    Parameters
+    ----------
+    Lambda_d: np.ndarray
+        The principal component variances
+    Lambda_e: np.ndarray
+        The minor components variances
+    alpha: float
+        The confidence level to use for the critical values
+
+    Returns
+    -------
+    Q_d_crit: float
+        The critical Q value for the slowest features
+    Q_e_crit: float
+        The critical Q value for the fastest features
+    """
+    if alpha > 1 or alpha < 0:
+        raise ValueError("Confidence level should be between 0 and 1")
+    p = 1 - alpha
+
+    theta_1 = np.sum(np.diag(Lambda_d) ** 2)
+    theta_2 = np.sum(np.diag(Lambda_d) ** 4)
+    theta_3 = np.sum(np.diag(Lambda_d) ** 6)
+    h_0 = 1 - (2 * theta_1 * theta_3)/(3 * theta_2 ** 2)
+    c = stats.norm.ppf(p)
+    Q_d_crit = theta_1 * ((h_0 * c * (2 * theta_2) ** (1/2))/theta_1
+                          + (theta_2 * h_0 * (h_0 - 1))/theta_1 ** 2
+                          + 1) ** (1/h_0)
+
+    theta_1 = np.sum(np.diag(Lambda_e) ** 2)
+    theta_2 = np.sum(np.diag(Lambda_e) ** 4)
+    theta_3 = np.sum(np.diag(Lambda_e) ** 6)
+    h_0 = 1 - (2 * theta_1 * theta_3)/(3 * theta_2 ** 2)
+    c = stats.norm.ppf(p)
+    Q_e_crit = theta_1 * ((h_0 * c * (2 * theta_2) ** (1/2))/theta_1
+                          + (theta_2 * h_0 * (h_0 - 1))/theta_1 ** 2
+                          + 1) ** (1/h_0)
+
+    return(Q_d_crit, Q_e_crit)
 
 
 def calculate_test_stats(Y: np.ndarray,
@@ -92,6 +143,54 @@ def calculate_test_stats(Y: np.ndarray,
         Sd[i] = Ydot[:Md, i].T @ Omega_inv[:Md, :Md] @ Ydot[:Md, i]
         Se[i] = Ydot[Md:, i].T @ Omega_inv[Md:, Md:] @ Ydot[Md:, i]
     return(Td, Te, Sd, Se)
+
+
+def calculate_test_stats_pca(X: np.ndarray,
+                             Md: int,
+                             P: np.ndarray,
+                             Lambda_inv: np.ndarray) -> Tuple[np.ndarray,
+                                                              np.ndarray,
+                                                              np.ndarray,
+                                                              np.ndarray]:
+    """ Calculate T^2 and S^2 test statistics for slowest and fastest features
+
+    Parameters
+    ----------
+    Y: np.ndarray
+        An [m X n] matrix of features to calculate the statistics for
+    Md: int
+        The number of features considered to be 'slow', 1 <= Md <= m
+    Omega_inv: np.ndarray
+        An [m X m] diagonal matrix containing the speeds of the features
+
+    Returns
+    -------
+    Td: np.ndarray
+        The T^2 values for the slowest features in an [n] array
+    Te: np.ndarray
+        The T^2 values for the fastest features in an [n] array
+    SPEd: np.ndarray
+        The SPE^2 values for the slowest features in an [n] array
+    SPEe: np.ndarray
+        The SPE^2 values for the fastest features in an [n] array
+    """
+    m, n = X.shape
+
+    Td = np.zeros((n,))
+    Te = np.zeros((n,))
+    SPEd = np.zeros((n,))
+    SPEe = np.zeros((n,))
+
+    for i in range(n):
+        Td[i] = (X[:, i].T @ P[:, :Md] @ Lambda_inv[:Md, :Md]
+                 @ P[:, :Md].T @ X[:, i])
+        Te[i] = (X[:, i].T @ P[:, Md:] @ Lambda_inv[Md:, Md:]
+                 @ P[:, Md:].T @ X[:, i])
+        rd = (np.eye(m) - P[:, :Md] @ P[:, :Md].T) @ X[:, i]
+        re = (np.eye(m) - P[:, Md:] @ P[:, Md:].T) @ X[:, i]
+        SPEd[i] = rd.T @ rd
+        SPEe[i] = re.T @ re
+    return(Td, Te, SPEd, SPEe)
 
 
 def plot_test_stats(fig_name: str,
@@ -240,3 +339,78 @@ def calculate_fault_contributions(X: np.ndarray,
         Sd_cont[:, i] = Sd_fd.get_contributions(X_dot[:, i], index)[index]
         Se_cont[:, i] = Se_fd.get_contributions(X_dot[:, i], index)[index]
     return(Td_cont, Te_cont, Sd_cont, Se_cont)
+
+
+def calculate_fault_contributions_pca(X: np.ndarray,
+                                      P: np.ndarray,
+                                      Lambda_inv: np.ndarray,
+                                      Md: int,
+                                      index: str = 'CDC') -> Tuple[np.ndarray,
+                                                                   np.ndarray,
+                                                                   np.ndarray,
+                                                                   np.ndarray]:
+    """ Calculate the contributions of input variables to T^2 and S^2
+    test statistics for slowest and fastest features
+
+    Parameters
+    ----------
+    X: np.ndarray
+        An [m X n] matrix of centered data to calculate the statistics for
+    W: np.ndarray
+        A [J X m] data to feature transformation matrix
+    Omega_inv: np.ndarray
+        An [m X m] diagonal matrix containing the speeds of the features
+    Md: int
+        The number of features considered to be 'slow', 1 <= Md <= m
+    index: str
+        The type of fault contribution to calculate, options are 'CDC', 'PDC',
+        'DC', 'RBC', 'rCDC', 'rPDC', 'rDC', 'rRBC'.
+
+    Returns
+    -------
+    Td_cont: np.ndarray
+        The T^2 contributions for the slowest features in an [m X n] array
+    Te_cont: np.ndarray
+        The T^2 contributions for the fastest features in an [m X n] array
+    Sd_cont: np.ndarray
+        The S^2 contributions for the slowest features in an [m X n-1] array
+    Se_cont: np.ndarray
+        The S^2 contributions for the fastest features in an [m X n-1] array
+    """
+    m, n = X.shape
+    if index.lower() != "cdc":
+        raise NotImplementedError
+
+    P = P.T
+
+    P_d = P[:Md, :]
+    P_e = P[Md:, :]
+
+    Lambda_inv_d = Lambda_inv[:Md, :Md]
+    Lambda_inv_e = Lambda_inv[Md:, Md:]
+
+    M_Td = P_d.T @ Lambda_inv_d @ P_d
+    M_Te = P_e.T @ Lambda_inv_e @ P_e
+    M_SPEd = (np.eye(m) - P_d.T @ P_d).T @ (np.eye(m) - P_d.T @ P_d)
+    M_SPEe = (np.eye(m) - P_e.T @ P_e).T @ (np.eye(m) - P_e.T @ P_e)
+
+    Td_fd = fd.GenericFaultDiagnosisModel(M_Td, np.eye(m))
+    Te_fd = fd.GenericFaultDiagnosisModel(M_Te, np.eye(m))
+    SPEd_fd = fd.GenericFaultDiagnosisModel(M_SPEd, np.eye(m))
+    SPEe_fd = fd.GenericFaultDiagnosisModel(M_SPEe, np.eye(m))
+
+    m, n_test = X.shape
+    Td_cont = np.zeros((m, n_test))
+    Te_cont = np.zeros((m, n_test,))
+    SPEd_cont = np.zeros((m, n_test,))
+    SPEe_cont = np.zeros((m, n_test,))
+
+    for i in range(n_test):
+        Td_cont[:, i] = Td_fd.get_contributions(X[:, i], index)[index]
+        Te_cont[:, i] = Te_fd.get_contributions(X[:, i], index)[index]
+        if i == n_test - 1:
+            # Skip final sample for S^2
+            continue
+        SPEd_cont[:, i] = SPEd_fd.get_contributions(X[:, i], index)[index]
+        SPEe_cont[:, i] = SPEe_fd.get_contributions(X[:, i], index)[index]
+    return(Td_cont, Te_cont, SPEd_cont, SPEe_cont)
