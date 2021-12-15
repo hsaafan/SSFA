@@ -46,10 +46,15 @@ if __name__ == "__main__":
     Lambda_inv_ssfa = np.linalg.pinv(W_ssfa.T @ W_ssfa)
 
     spca = SparsePCA(n_components=Md, max_iter=500, tol=1e-6)
-    T = spca.fit_transform(X.T)
+    spca.fit(X.T)
     print(f"SPCA converged in {spca.n_iter_} iterations")
-    Lambda_spca = np.cov(T.T)
-    Lambda_inv_spca = np.diag(np.diag(Lambda_spca) ** -1)
+    P = spca.components_.T
+    P_d = P[:, :Md]
+    P_e = P[:, Md:]
+    scores_d = X.T @ P_d
+    scores_e = X.T @ P_e
+    gamma_inv_d = np.linalg.inv(np.cov(scores_d.T))
+    gamma_inv_e = np.linalg.inv(np.cov(scores_e.T))
 
     mssfa_object = mssfa.MSSFA("chol", "l1")
     W_mssfa, Omega_inv_mssfa, _, _, _ = mssfa_object.run(X, Md)
@@ -71,15 +76,16 @@ if __name__ == "__main__":
             stats_ssfa[1][i] = (Y_ssfa[Md:, i].T @ Lambda_inv_ssfa[Md:, Md:]
                                 @ Y_ssfa[Md:, i])
 
-        stats_spca = fd.calculate_test_stats_pca(X_test, Md,
-                                                 spca.components_.T,
-                                                 Lambda_inv_spca)
+        stats_spca = fd.calculate_test_stats_pca(X_test.T, P, gamma_inv_d,
+                                                 gamma_inv_e, Md)
 
         stats_mssfa = fd.calculate_test_stats(Y_mssfa, Md, Omega_inv_mssfa)
 
         results.append((name, stats_sfa, stats_ssfa, stats_spca, stats_mssfa))
 
-    Tdc, Tec, Sdc, Sec = fd.calculate_crit_values(n_test, Md, Me, alpha)
+    Tdc, Tec, Sdc, Sec = fd.calculate_crit_values(n, Md, Me, alpha)
+    Tdc_pca, Tec_pca, SPEd, SPEe = fd.calculate_crit_values_pca(X.T, P, n, Md,
+                                                                Me, alpha)
 
     fdr_results = []
     for name, stats_sfa, stats_ssfa, stats_spca, stats_mssfa in results:
@@ -87,14 +93,20 @@ if __name__ == "__main__":
         S_fault_index = 159 - lagged_samples
 
         idv_results = [name]
-        for Td, Te, Sd, Se in [stats_sfa, stats_ssfa, stats_spca, stats_mssfa]:
+        stats = zip(["SFA", "SSFA", "SPCA", "MSSFA"],
+                    [stats_sfa, stats_ssfa, stats_spca, stats_mssfa])
+        for method, (Td, Te, Sd, Se) in stats:
+            if method == "SPCA":
+                crit_val = Tdc_pca
+            else:
+                crit_val = Tdc
             if name == "IDV(0)":
                 FDR = 0
-                FAR = np.count_nonzero(Td > Tdc) / len(Td)
+                FAR = np.count_nonzero(Td > crit_val) / len(Td)
             else:
-                FDR = (np.count_nonzero(Td[T_fault_index:] > Tdc)
+                FDR = (np.count_nonzero(Td[T_fault_index:] > crit_val)
                        / (len(Td) - T_fault_index))
-                FAR = (np.count_nonzero(Td[:T_fault_index] > Tdc)
+                FAR = (np.count_nonzero(Td[:T_fault_index] > crit_val)
                        / T_fault_index)
             idv_results.append(FDR)
             idv_results.append(FAR)
