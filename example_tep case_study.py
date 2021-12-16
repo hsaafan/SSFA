@@ -16,27 +16,56 @@ from sklearn.decomposition import SparsePCA
 import tepimport
 
 if __name__ == "__main__":
+    load_ssfa = True
     alpha = 0.01
     Md = 55
     lagged_samples = 2
     fd_method = 'CDC'
-    fd_samples = [i for i in range(152, 163)]  # Contribution plot samples
-    n_to_plot = 10  # Contribution plot number of variables to plot
-    idv = [4]
+    fd_samples = [i for i in range(202, 213)]  # Contribution plot samples
+    n_to_plot = 5  # Contribution plot number of variables to plot
+    idv = [11]
     # Linestyles for the n_to_plot variables
-    colors = [u'#1f77b4', u'#ff7f0e', u'#2ca02c', u'#d62728', u'#9467bd',
-              u'#8c564b', u'#e377c2', u'#7f7f7f', u'#bcbd22', u'#17becf',
-              "black"]
-    marker_styles = ['o', 'v', '^', '<', '>', 's', 'D', 'X', 'p', 'P', 'H']
-    fill_styles = ['full', 'left', 'top']
+    markers = [(u'#1f77b4', 'o', 'left'),       # XMEAS(01)
+               (u'#ff7f0e', 'v', 'full'),       # XMEAS(02)
+               (u'#2ca02c', '^', 'full'),       # XMEAS(03)
+               (u'#7f7f7f', 'X', 'top'),        # XMEAS(04)
+               (u'#9467bd', '>', 'top'),        # XMEAS(05)
+               (u'#8c564b', 's', 'left'),       # XMEAS(06)
+               (u'#e377c2', 'D', 'full'),       # XMEAS(07)
+               (u'#7f7f7f', 'X', 'left'),       # XMEAS(08)
+               (u'#bcbd22', 'p', 'full'),       # XMEAS(09)
+               (u'#d62728', '<', 'left'),       # XMEAS(10)
+               ("black", 'H', 'top'),           # XMEAS(11)
+               (u'#ff7f0e', 'v', 'left'),       # XMEAS(12)
+               (u'#1f77b4', 'o', 'full'),       # XMEAS(13)
+               (u'#2ca02c', '^', 'left'),       # XMEAS(14)
+               (u'#17becf', 'P', 'full'),       # XMEAS(15)
+               (u'#9467bd', '>', 'left'),       # XMEAS(16)
+               (u'#8c564b', 's', 'full'),       # XMEAS(17)
+               (u'#e377c2', 'D', 'left'),       # XMEAS(18)
+               (u'#7f7f7f', 'X', 'full'),       # XMEAS(19)
+               (u'#bcbd22', 'p', 'left'),       # XMEAS(20)
+               (u'#17becf', 'P', 'full'),       # XMEAS(21)
+               ("black", 'H', 'left'),          # XMEAS(22)
+               (u'#1f77b4', 'o', 'top'),        # XMV(01)
+               (u'#ff7f0e', 'v', 'top'),        # XMV(02)
+               (u'#2ca02c', '^', 'top'),        # XMV(03)
+               (u'#d62728', '<', 'top'),        # XMV(04)
+               (u'#17becf', 'P', 'top'),        # XMV(05)
+               (u'#8c564b', 's', 'top'),        # XMV(06)
+               (u'#e377c2', 'D', 'top'),        # XMV(07)
+               (u'#bcbd22', 'p', 'top'),        # XMV(08)
+               (u'#d62728', '<', 'full'),       # XMV(09)
+               (u'#9467bd', '>', 'full'),       # XMV(10)
+               ("black", 'H', 'full'),          # XMV(11)
+               ]
     linestyles = ['--', '-.', ':']
     styles = []
     for L in linestyles:
-        for f in fill_styles:
-            for c, m in zip(colors, marker_styles):
-                styles.append(dict(marker=m, linestyle=L,
-                                   fillstyle=f, color=c,
-                                   alpha=0.5, markersize=15))
+        for c, m, f in markers:
+            styles.append(dict(marker=m, linestyle=L,
+                               fillstyle=f, color=c,
+                               alpha=1, markersize=15))
     """Import Data"""
     ignored_var = list(range(22, 41))
     X = tepimport.import_sets(0, skip_test=True)[0][1]
@@ -65,14 +94,24 @@ if __name__ == "__main__":
     W_sfa, Omega_inv_sfa = sfa_object.run(X, Md)
 
     ssfa_object = ssfa.SSFA()
-    W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md)
+    if load_ssfa:
+        with open('ssfa_matrix.npy', 'rb') as f:
+            W_ssfa = np.load(f)
+            Omega_inv_ssfa = np.load(f)
+    else:
+        W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md)
     Lambda_inv_ssfa = np.linalg.pinv(W_ssfa.T @ W_ssfa)
 
     spca = SparsePCA(n_components=Md, max_iter=500, tol=1e-6)
-    T = spca.fit_transform(X.T)
+    spca.fit(X.T)
     print(f"SPCA converged in {spca.n_iter_} iterations")
-    Lambda_spca = np.cov(T.T)
-    Lambda_inv_spca = np.diag(np.diag(Lambda_spca) ** -1)
+    P = spca.components_.T
+    P_d = P[:, :Md]
+    P_e = P[:, Md:]
+    scores_d = X.T @ P_d
+    scores_e = X.T @ P_e
+    gamma_inv_d = np.linalg.inv(np.cov(scores_d.T))
+    gamma_inv_e = np.linalg.inv(np.cov(scores_e.T))
 
     mssfa_object = mssfa.MSSFA("chol", "l1")
     W_mssfa, Omega_inv_mssfa, _, _, _ = mssfa_object.run(X, Md)
@@ -94,16 +133,11 @@ if __name__ == "__main__":
                                                       Omega_inv_ssfa,
                                                       Md, fd_method)
 
-        Y_spca = spca.transform(X_test.T).T
-        D = spca.components_.T @ Lambda_inv_spca ** (1/2)
-        Lambda_spca = np.diag(np.diag(Lambda_spca))
-        stats_spca = fd.calculate_test_stats_pca(X_test, Md,
-                                                 spca.components_.T,
-                                                 Lambda_inv_spca)
-        conts_spca = fd.calculate_fault_contributions_pca(X_cont,
-                                                          spca.components_.T,
-                                                          Lambda_inv_spca,
-                                                          Md, fd_method)
+        stats_spca = fd.calculate_test_stats_pca(X_test.T, P, gamma_inv_d,
+                                                 gamma_inv_e, Md)
+        conts_spca = fd.calculate_fault_contributions_pca(X_cont.T, P,
+                                                          gamma_inv_d,
+                                                          gamma_inv_e, Md)
 
         Y_mssfa = (W_mssfa.T @ X_test)
         stats_mssfa = fd.calculate_test_stats(Y_mssfa, Md, Omega_inv_mssfa)
@@ -123,32 +157,32 @@ if __name__ == "__main__":
                         stats_mssfa, conts_mssfa))
 
     Tdc, Tec, Sdc, Sec = fd.calculate_crit_values(n_test, Md, Me, alpha)
-    Qdc, Qec = fd.calculate_Q_crit(Lambda_spca[:Md, :Md],
-                                   Lambda_spca[Md:, Md:], alpha)
+    Tdc_pca, Tec_pca, SPEd, SPEe = fd.calculate_crit_values_pca(X.T, P, n, Md,
+                                                                Me, alpha)
 
     index_labels = [
-        "XMEAS(01) A Feed  (stream 1) kscmh",
-        "XMEAS(02) D Feed  (stream 2) kg/hr",
-        "XMEAS(03) E Feed  (stream 3) kg/hr",
-        "XMEAS(04) A and C Feed  (stream 4) kscmh",
-        "XMEAS(05) Recycle Flow  (stream 8) kscmh",
-        "XMEAS(06) Reactor Feed Rate  (stream 6) kscmh",
-        "XMEAS(07) Reactor Pressure kPa gauge",
-        "XMEAS(08) Reactor Level %",
-        "XMEAS(09) Reactor Temperature Deg C",
-        "XMEAS(10) Purge Rate (stream 9) kscmh",
-        "XMEAS(11) Product Sep Temp Deg C",
-        "XMEAS(12) Product Sep Level %",
-        "XMEAS(13) Prod Sep Pressure kPa gauge",
-        "XMEAS(14) Prod Sep Underflow (stream 10) m3/hr",
-        "XMEAS(15) Stripper Level %",
-        "XMEAS(16) Stripper Pressure kPa gauge",
-        "XMEAS(17) Stripper Underflow (stream 11) m3/hr",
-        "XMEAS(18) Stripper Temperature Deg C",
-        "XMEAS(19) Stripper Steam Flow kg/hr",
-        "XMEAS(20) Compressor Work kW",
-        "XMEAS(21) Reactor Cooling Water Outlet Temp Deg C",
-        "XMEAS(22) Separator Cooling Water Outlet Temp Deg C",
+        "XMEAS(01) A Feed  (stream 1)",
+        "XMEAS(02) D Feed  (stream 2)",
+        "XMEAS(03) E Feed  (stream 3)",
+        "XMEAS(04) A and C Feed  (stream 4)",
+        "XMEAS(05) Recycle Flow  (stream 8)",
+        "XMEAS(06) Reactor Feed Rate  (stream 6)",
+        "XMEAS(07) Reactor Pressure",
+        "XMEAS(08) Reactor Level",
+        "XMEAS(09) Reactor Temperature",
+        "XMEAS(10) Purge Rate (stream 9)",
+        "XMEAS(11) Product Separator Temperature",
+        "XMEAS(12) Product Separator Level",
+        "XMEAS(13) Prod Separator Pressure",
+        "XMEAS(14) Prod Separator Underflow (stream 10)",
+        "XMEAS(15) Stripper Level",
+        "XMEAS(16) Stripper Pressure",
+        "XMEAS(17) Stripper Underflow (stream 11)",
+        "XMEAS(18) Stripper Temperature",
+        "XMEAS(19) Stripper Steam Flow",
+        "XMEAS(20) Compressor Work",
+        "XMEAS(21) Reactor CW Outlet Temperature",
+        "XMEAS(22) Separator CW Outlet Temperature",
         "XMV(01) D Feed Flow (stream 2)",
         "XMV(02) E Feed Flow (stream 3)",
         "XMV(03) A Feed Flow (stream 1)",
@@ -158,8 +192,8 @@ if __name__ == "__main__":
         "XMV(07) Separator Pot Liquid Flow (stream 10)",
         "XMV(08) Stripper Liquid Product Flow (stream 11)",
         "XMV(09) Stripper Steam Valve",
-        "XMV(10) Reactor Cooling Water Flow",
-        "XMV(11) Condenser Cooling Water Flow",
+        "XMV(10) Reactor CW Flow",
+        "XMV(11) Condenser CW Flow",
     ]
     lagged_labels = []
     for i in range(1, lagged_samples + 1):
@@ -171,42 +205,57 @@ if __name__ == "__main__":
     for (idv_name, stats_sfa, conts_sfa, stats_ssfa, conts_ssfa,
          stats_spca, conts_spca, stats_mssfa, conts_mssfa) in results:
         """Plot Stats"""
-        _f, axs2d = plt.subplots(nrows=3, ncols=1, sharex=True)
-        _f.set_size_inches(10.5, 9)
+        _f, axs2d = plt.subplots(nrows=2, ncols=1, sharex=True)
+        _f.set_size_inches(16, 9)
 
         Td_plot = axs2d[0]
-        Td_plot.set_title(f"{idv_name} Test Statistics")
-        Td_plot.set_ylabel("$T^2$")
+        Td_plot.set_title(f"{idv_name} Test Statistics", fontsize=20)
+        Td_plot.set_ylabel("$T^2$", fontsize=20)
         Td_plot.plot(stats_sfa[0], label='SFA')
         Td_plot.plot(stats_ssfa[0], label='Sparse SFA')
-        Td_plot.plot(stats_spca[0], label='Sparse PCA')
         Td_plot.plot(stats_mssfa[0], label='Manifold Sparse SFA')
-        Td_plot.plot([Tdc] * len(stats_sfa[0]))
-        Td_plot.legend(loc='upper left')
+        Td_plot.plot([Tdc] * len(stats_sfa[0]), 'k')
+        Td_plot.legend(loc='upper left', handlelength=4, fontsize=15)
+        Td_plot.tick_params(axis='both', which='major', labelsize=15)
 
         Sd_plot = axs2d[1]
-        Sd_plot.set_ylabel("$S^2$")
+        Sd_plot.set_ylabel("$S^2$", fontsize=20)
         Sd_plot.plot(stats_sfa[2], label='SFA')
         Sd_plot.plot(stats_ssfa[2], label='Sparse SFA')
-        Sd_plot.plot([0])
         Sd_plot.plot(stats_mssfa[2], label='Manifold Sparse SFA')
-        Sd_plot.plot([Sdc] * len(stats_sfa[2]))
-        Sd_plot.legend(loc='upper left')
-
-        SPE_plot = axs2d[2]
-        SPE_plot.set_ylabel("SPE")
-        SPE_plot.plot([0])
-        SPE_plot.plot([0])
-        SPE_plot.plot(stats_spca[2], label='Sparse PCA')
-        SPE_plot.plot([0])
-        SPE_plot.plot([Qdc] * len(stats_sfa[2]))
-        SPE_plot.legend(loc='upper left')
-        SPE_plot.set_xlabel("Sample")
+        Sd_plot.plot([Sdc] * len(stats_sfa[2]), 'k')
+        Sd_plot.legend(loc='upper left', handlelength=4, fontsize=15)
+        Sd_plot.set_xlabel("Sample", fontsize=20)
+        Sd_plot.tick_params(axis='both', which='major', labelsize=15)
 
         _f.set_tight_layout(True)
         plt.savefig(f'plots/CS/{idv_name}_stats.png', dpi=350)
         plt.close(fig=_f)
         _f = None
+
+        _f_spca, axs2d_spca = plt.subplots(nrows=2, ncols=1, sharex=True)
+        _f_spca.set_size_inches(16, 9)
+
+        Td_spca_plot = axs2d_spca[0]
+        Td_spca_plot.set_title(f"{idv_name} Test Statistics", fontsize=20)
+        Td_spca_plot.set_ylabel("$T^2$", fontsize=20)
+        Td_spca_plot.plot(stats_spca[0], label='Sparse PCA')
+        Td_spca_plot.plot([Tdc_pca] * len(stats_spca[0]), 'k')
+        Td_spca_plot.legend(loc='upper left', handlelength=4, fontsize=15)
+        Td_spca_plot.tick_params(axis='both', which='major', labelsize=15)
+
+        Sd_spca_plot = axs2d_spca[1]
+        Sd_spca_plot.set_ylabel("SPE", fontsize=20)
+        Sd_spca_plot.plot(stats_spca[2], label='Sparse PCA')
+        Sd_spca_plot.plot([SPEd] * len(stats_sfa[2]), 'k')
+        Sd_spca_plot.legend(loc='upper left', handlelength=4, fontsize=15)
+        Sd_spca_plot.set_xlabel("Sample", fontsize=20)
+        Sd_spca_plot.tick_params(axis='both', which='major', labelsize=15)
+
+        _f_spca.set_tight_layout(True)
+        plt.savefig(f'plots/CS/{idv_name}_stats_spca.png', dpi=350)
+        plt.close(fig=_f_spca)
+        _f_spca = None
 
         for name, conts in zip(["SFA", "SSFA", "SPCA", "MSSFA"],
                                [conts_sfa, conts_ssfa,
@@ -218,27 +267,33 @@ if __name__ == "__main__":
             # Get the order of the contribution values in descending order
             order_T = np.argsort(-1 * max_T)
             order_S = np.argsort(-1 * max_S)
+            if n_to_plot < len(order_T):
+                order_T = list(order_T)[:n_to_plot]
+                order_S = list(order_S)[:n_to_plot]
 
             # Create plot
-            grid_dict = {'width_ratios': [4, 1]}
-            _f, ax = plt.subplots(nrows=2, ncols=2, gridspec_kw=grid_dict)
-            _f.set_size_inches(21, 14)
+            grid_dict = {'width_ratios': [2, 1]}
+            _f, ax = plt.subplots(nrows=2, ncols=2, gridspec_kw=grid_dict,
+                                  sharex=True)
+            _f.set_size_inches(16, 9)
 
             # Reindex to match up with data sample numbers
             indices_T = [i + lagged_samples + 1 for i in fd_samples]
+            indices_T = indices_T[1:]
+            T_plot = conts[0][:, 1:]
             if name == "SPCA":
                 indices_S = indices_T.copy()
+                S_plot = conts[2][:, 1:]
             else:
                 indices_S = [i + lagged_samples + 2 for i in fd_samples[:-1]]
+                S_plot = conts[2]
 
             # Plot the contributions
-            for i in range(min(n_to_plot, len(order_T))):
-                index = order_T[i]
-                ax[0, 0].plot(indices_T, conts[0][index, :], **styles[index],
-                              label=index_labels[index])
-            for i in range(min(n_to_plot, len(order_S))):
-                index = order_S[i]
-                ax[1, 0].plot(indices_S, conts[2][index, :], **styles[index],
+            for index in order_T:
+                ax[0, 0].plot(indices_T, T_plot[index, :],
+                              **styles[index], label=index_labels[index])
+            for index in order_S:
+                ax[1, 0].plot(indices_S, S_plot[index, :], **styles[index],
                               label=index_labels[index])
 
             ax[0, 0].set_title(f"{name} Top {n_to_plot} $T^2$ "
@@ -247,18 +302,17 @@ if __name__ == "__main__":
             ax[0, 0].set_ylabel('$T^2$ Contribution', fontsize=20)
             ax[0, 0].set_xticks(indices_T)
             ax[0, 0].tick_params(axis='both', which='major', labelsize=15)
-            ax[0, 0].set_xlabel('Sample', fontsize=20)
 
             if name == "SPCA":
                 ax[1, 0].set_title(f"{name} Top {n_to_plot} SPE "
                                    f"Contributors for {idv_name}",
                                    fontsize=20)
-                ax[1, 0].set_ylabel('SPE', fontsize=20)
+                ax[1, 0].set_ylabel('SPE Contribution', fontsize=20)
             else:
                 ax[1, 0].set_title(f"{name} Top {n_to_plot} $S^2$ "
                                    f"Contributors for {idv_name}",
                                    fontsize=20)
-                ax[1, 0].set_ylabel('$S^2$', fontsize=20)
+                ax[1, 0].set_ylabel('$S^2$ Contribution', fontsize=20)
             ax[1, 0].set_xticks(indices_S)
             ax[1, 0].tick_params(axis='both', which='major', labelsize=15)
             ax[1, 0].set_xlabel('Sample', fontsize=20)
@@ -289,6 +343,12 @@ if __name__ == "__main__":
             labels, lines = zip(*sorted(zip(labels, lines)))
             labels = list(labels)
             lines = list(lines)
+            for i in range(len(lines)):
+                lines[i] = Line2D([0], [0], color=lines[i]._color,
+                                  markersize=lines[i]._markersize,
+                                  marker=lines[i]._marker._marker,
+                                  fillstyle=lines[i]._marker._fillstyle,
+                                  linestyle='None')
             # Add lines for lagged samples
             for i in range(min(lagged_samples + 1, 3)):
                 if i > 0:
@@ -306,6 +366,8 @@ if __name__ == "__main__":
             axleg.legend(lines, labels, loc='center', frameon=False,
                          handlelength=4, fontsize=15)
             axleg.axis('off')
+
+            _f.set_tight_layout(True)
 
             plt.savefig(f'plots/CS/{idv_name}_{name}_FD.png', dpi=350)
             plt.close(fig=_f)

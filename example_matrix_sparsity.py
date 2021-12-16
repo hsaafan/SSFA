@@ -9,6 +9,7 @@ from sklearn.decomposition import SparsePCA
 import tepimport
 
 if __name__ == "__main__":
+    load_ssfa = True
     alpha = 0.01
     Md = 55  # How many to calculate
     lagged_samples = 2
@@ -34,7 +35,12 @@ if __name__ == "__main__":
     W_sfa, Omega_inv_sfa = sfa_object.run(X, Md)
 
     ssfa_object = ssfa.SSFA()
-    W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md)
+    if load_ssfa:
+        with open('ssfa_matrix.npy', 'rb') as f:
+            W_ssfa = np.load(f)
+            Omega_inv_ssfa = np.load(f)
+    else:
+        W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md)
     Lambda_inv_ssfa = np.linalg.pinv(W_ssfa.T @ W_ssfa)
 
     spca = SparsePCA(n_components=Md, max_iter=500, tol=1e-6)
@@ -55,28 +61,28 @@ if __name__ == "__main__":
 
     """Print Slowest Feature"""
     index_labels = [
-        "XMEAS(01) A Feed  (stream 1) kscmh",
-        "XMEAS(02) D Feed  (stream 2) kg/hr",
-        "XMEAS(03) E Feed  (stream 3) kg/hr",
-        "XMEAS(04) A and C Feed  (stream 4) kscmh",
-        "XMEAS(05) Recycle Flow  (stream 8) kscmh",
-        "XMEAS(06) Reactor Feed Rate  (stream 6) kscmh",
-        "XMEAS(07) Reactor Pressure kPa gauge",
-        "XMEAS(08) Reactor Level %",
-        "XMEAS(09) Reactor Temperature Deg C",
-        "XMEAS(10) Purge Rate (stream 9) kscmh",
-        "XMEAS(11) Product Sep Temp Deg C",
-        "XMEAS(12) Product Sep Level %",
-        "XMEAS(13) Prod Sep Pressure kPa gauge",
-        "XMEAS(14) Prod Sep Underflow (stream 10) m3/hr",
-        "XMEAS(15) Stripper Level %",
-        "XMEAS(16) Stripper Pressure kPa gauge",
-        "XMEAS(17) Stripper Underflow (stream 11) m3/hr",
-        "XMEAS(18) Stripper Temperature Deg C",
-        "XMEAS(19) Stripper Steam Flow kg/hr",
-        "XMEAS(20) Compressor Work kW",
-        "XMEAS(21) Reactor Cooling Water Outlet Temp Deg C",
-        "XMEAS(22) Separator Cooling Water Outlet Temp Deg C",
+        "XMEAS(01) A Feed  (stream 1)",
+        "XMEAS(02) D Feed  (stream 2)",
+        "XMEAS(03) E Feed  (stream 3)",
+        "XMEAS(04) A and C Feed  (stream 4)",
+        "XMEAS(05) Recycle Flow  (stream 8)",
+        "XMEAS(06) Reactor Feed Rate  (stream 6)",
+        "XMEAS(07) Reactor Pressure",
+        "XMEAS(08) Reactor Level",
+        "XMEAS(09) Reactor Temperature",
+        "XMEAS(10) Purge Rate (stream 9)",
+        "XMEAS(11) Product Separator Temperature",
+        "XMEAS(12) Product Separator Level",
+        "XMEAS(13) Prod Separator Pressure",
+        "XMEAS(14) Prod Separator Underflow (stream 10)",
+        "XMEAS(15) Stripper Level",
+        "XMEAS(16) Stripper Pressure",
+        "XMEAS(17) Stripper Underflow (stream 11)",
+        "XMEAS(18) Stripper Temperature",
+        "XMEAS(19) Stripper Steam Flow",
+        "XMEAS(20) Compressor Work",
+        "XMEAS(21) Reactor CW Outlet Temperature",
+        "XMEAS(22) Separator CW Outlet Temperature",
         "XMV(01) D Feed Flow (stream 2)",
         "XMV(02) E Feed Flow (stream 3)",
         "XMV(03) A Feed Flow (stream 1)",
@@ -86,8 +92,8 @@ if __name__ == "__main__":
         "XMV(07) Separator Pot Liquid Flow (stream 10)",
         "XMV(08) Stripper Liquid Product Flow (stream 11)",
         "XMV(09) Stripper Steam Valve",
-        "XMV(10) Reactor Cooling Water Flow",
-        "XMV(11) Condenser Cooling Water Flow",
+        "XMV(10) Reactor CW Flow",
+        "XMV(11) Condenser CW Flow",
     ]
     lagged_labels = []
     for i in range(1, lagged_samples + 1):
@@ -101,20 +107,28 @@ if __name__ == "__main__":
     mssfa_slowest = np.argsort(-1 * np.abs(mssfa_sparse[:, 0]))
     print("SFA")
     for i in range(10):
-        print(index_labels[sfa_slowest[i]],
-              sfa_sparse[:, 0][sfa_slowest[i]])
+        print(f"{index_labels[sfa_slowest[i]]}, "
+              f"{sfa_sparse[:, 0][sfa_slowest[i]] * 100:.2f}")
+    remainder = 1 - np.sum(sfa_sparse[:, 0][sfa_slowest[:10]])
+    print(f"Others: {remainder * 100:.2f}")
     print("Sparse SFA")
     for i in range(10):
-        print(index_labels[ssfa_slowest[i]],
-              ssfa_sparse[:, 0][ssfa_slowest[i]])
+        print(f"{index_labels[ssfa_slowest[i]]}, "
+              f"{ssfa_sparse[:, 0][ssfa_slowest[i]] * 100:.2f}")
+    remainder = 1 - np.sum(ssfa_sparse[:, 0][ssfa_slowest[:10]])
+    print(f"Others: {remainder * 100:.2f}")
     print("Sparse PCA")
     for i in range(10):
-        print(index_labels[spca_slowest[i]],
-              spca_sparse[:, 0][spca_slowest[i]])
+        print(f"{index_labels[spca_slowest[i]]}, "
+              f"{spca_sparse[:, 0][spca_slowest[i]] * 100:.2f}")
+    remainder = 1 - np.sum(spca_sparse[:, 0][spca_slowest[:10]])
+    print(f"Others: {remainder * 100:.2f}")
     print("Manifold Sparse SFA")
     for i in range(10):
-        print(index_labels[mssfa_slowest[i]],
-              mssfa_sparse[:, 0][mssfa_slowest[i]])
+        print(f"{index_labels[mssfa_slowest[i]]}, "
+              f"{mssfa_sparse[:, 0][mssfa_slowest[i]] * 100:.2f}")
+    remainder = 1 - np.sum(mssfa_sparse[:, 0][mssfa_slowest[:10]])
+    print(f"Others: {remainder * 100:.2f}")
 
     """Sparsity Plot"""
     for threshold in thresholds:
