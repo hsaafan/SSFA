@@ -147,3 +147,14 @@ plots/contribs.xls
 plots/sp.gif
 plots/sp33.gif
 plots/CS/contribs.csv
+CVACaseStudy/license.txt
+CVACaseStudy/CVACaseStudy/CUBenchmark.m
+CVACaseStudy/CVACaseStudy/cvatutor.m
+CVACaseStudy/CVACaseStudy/FaultyCase1.mat
+CVACaseStudy/CVACaseStudy/FaultyCase2.mat
+CVACaseStudy/CVACaseStudy/FaultyCase3.mat
+CVACaseStudy/CVACaseStudy/FaultyCase4.mat
+CVACaseStudy/CVACaseStudy/FaultyCase5.mat
+CVACaseStudy/CVACaseStudy/FaultyCase6.mat
+CVACaseStudy/CVACaseStudy/Training.mat
+CVACaseStudy/CVACaseStudy/html/CUBenchmark.html
