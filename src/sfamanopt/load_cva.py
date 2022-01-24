@@ -2,6 +2,7 @@ import os.path
 
 import scipy.io as io
 import numpy as np
+from tepimport import add_lagged_samples
 
 _folder_path = os.path.abspath("./CVACaseStudy/CVACaseStudy/")
 FILE_NAMES = (
@@ -55,13 +56,24 @@ def import_data_set(file_name: str) -> list:
     return(data)
 
 
-def import_sets() -> list:
+def import_sets(lagged_samples: int = 0) -> list:
+    """
+    Returns a list of all the data sets in the form of
+    Set name, Set data, Fault range, Fault evolution
+    """
     data_sets = []
     for i, (name, file_name) in enumerate(FILE_NAMES):
         data = import_data_set(file_name)
         if i > 4:  # Sets 5 and 6 have only 2 data sets
             data.pop()
-        data_sets.append((name, data, FAULT_START_STOP[i]))
+        for j, (X, F) in enumerate(data):
+            F_rng = [s for s in FAULT_START_STOP[i][j]]
+            if lagged_samples > 0:
+                X = add_lagged_samples(X, lagged_samples)
+                if F is not None:
+                    F = F[lagged_samples:]
+                F_rng = [max(s - lagged_samples, 0) for s in F_rng]
+            data_sets.append((f'{name}.{j + 1}', X, F_rng, F))
     return(data_sets)
 
 

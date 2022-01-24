@@ -9,7 +9,8 @@ import tepimport
 
 if __name__ == "__main__":
     alpha = 0.01
-    Md = 55
+    Md_ssfa = 74
+    Md_mssfa = 85
     lagged_samples = 2
     # Algorithm names for labels
     """Import Data"""
@@ -29,18 +30,17 @@ if __name__ == "__main__":
     X = X - X_mean
     X_std = np.std(X, axis=1).reshape((-1, 1))
     X_norm = X / X_std
-    Me = m - Md
 
     """Train Models"""
     ssfa_object = ssfa.SSFA()
-    W_ssfa, _, _, _, _ = ssfa_object.run(X, Md)
-    W_ssfa_norm, _, _, _, _ = ssfa_object.run(X_norm, Md)
+    W_ssfa, _, _, _, _ = ssfa_object.run(X, Md_ssfa)
+    W_ssfa_norm, _, _, _, _ = ssfa_object.run(X_norm, Md_ssfa)
     Lambda_inv_ssfa = np.linalg.pinv(W_ssfa.T @ W_ssfa)
     Lambda_inv_ssfa_norm = np.linalg.pinv(W_ssfa_norm.T @ W_ssfa_norm)
 
     mssfa_object = mssfa.MSSFA("chol", "l1")
-    W_mssfa, _, _, _, _ = mssfa_object.run(X, Md)
-    W_mssfa_norm, _, _, _, _ = mssfa_object.run(X_norm, Md)
+    W_mssfa, _, _, _, _ = mssfa_object.run(X, Md_mssfa)
+    W_mssfa_norm, _, _, _, _ = mssfa_object.run(X_norm, Md_mssfa)
 
     """Test data"""
     n_test = T.shape[1]
@@ -61,8 +61,6 @@ if __name__ == "__main__":
                        @ Y_ssfa_norm[:, i])
         T_sqr[2, i] = Y_mssfa[:, i].T @ Y_mssfa[:, i]
         T_sqr[3, i] = Y_mssfa_norm[:, i].T @ Y_mssfa_norm[:, i]
-
-    Tdc, Tec, Sdc, Sec = fd.calculate_crit_values(n_test, Md, Me, alpha)
 
     """Plot the comparison"""
     _f, axs2d = plt.subplots(nrows=2, ncols=2, sharex='col', sharey='row')

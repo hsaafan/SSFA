@@ -14,16 +14,44 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from sklearn.decomposition import SparsePCA
 
+import pickle
+
+
+def plot_test_stats(name: str, idv_name: str,
+                    T_stats: list, T_crit: float,
+                    S_stats: list, S_crit: float):
+    _f, axs2d = plt.subplots(nrows=2, ncols=1, sharex=True)
+    _f.set_size_inches(16, 9)
+
+    Td_plot = axs2d[0]
+    Td_plot.set_title(f"{name} {idv_name} Test Statistics", fontsize=20)
+    Td_plot.set_ylabel("$T^2$", fontsize=20)
+    Td_plot.plot(T_stats)
+    Td_plot.plot([T_crit] * len(T_stats), 'k')
+    Td_plot.tick_params(axis='both', which='major', labelsize=15)
+
+    Sd_plot = axs2d[1]
+    Sd_plot.set_ylabel("$S^2$", fontsize=20)
+    Sd_plot.plot(S_stats)
+    Sd_plot.plot([S_crit] * len(S_stats), 'k')
+    Sd_plot.set_xlabel("Sample", fontsize=20)
+    Sd_plot.tick_params(axis='both', which='major', labelsize=15)
+
+    _f.set_tight_layout(True)
+    return(_f, axs2d)
+
 
 if __name__ == "__main__":
     load_models = False
+    remove_var_24 = True
     alpha = 0.01
-    Md = 12
+    Md = [17, 61, 8, 14]
+    lagged_samples = 2
     fd_method = 'CDC'
-    fd_samples = [i for i in range(649, 660)]  # Contribution plot samples
+    fd_samples = [i for i in range(5175, 5190)]  # Contribution plot samples
     n_to_plot = 5  # Contribution plot number of variables to plot
-    fault_index = 0
-    subfault_index = 1
+    fault_index = 1         # 0 for traiing set, 1-6 for faults
+    subfault_index = 0      # set number - 1, so 1.1 would be 0, 1.2 is 1, etc.
     # Linestyles for the n_to_plot variables
     markers = [(u'#1f77b4', 'o', 'left'),       # Var 01
                (u'#ff7f0e', 'v', 'full'),       # Var 02
@@ -50,7 +78,8 @@ if __name__ == "__main__":
                ("black", 'H', 'full'),          # Var 23
                (u'#1f77b4', 'o', 'top'),        # Var 24
                ]
-    linestyles = ['--', '-.', ':']
+    linestyles = ['--', '-.', ':', (0, (5, 10)), (0, (1, 10)),
+                  (0, (3, 10, 1, 10))]
     styles = []
     for L in linestyles:
         for c, m, f in markers:
@@ -58,14 +87,22 @@ if __name__ == "__main__":
                                fillstyle=f, color=c,
                                alpha=1, markersize=15))
     """Import Data"""
-    """Import Data"""
-    data_sets = cva.import_sets()
-    X = np.hstack((data_sets[0][1][0][0],
-                   data_sets[0][1][1][0],
-                   data_sets[0][1][2][0]))
+    data_sets_unlagged = cva.import_sets(lagged_samples=0)
+    X = np.hstack([x[1] for x in data_sets_unlagged[:3]])
+    if remove_var_24:
+        X = X[:-1, :]
+    X = cva.add_lagged_samples(X, lagged_samples=lagged_samples)
 
-    name, data, f_range = data_sets[0]
-    tests = [(f"{name}.{subfault_index+1}", data[0], f_range[subfault_index])]
+    data_sets = cva.import_sets(lagged_samples=0)
+    tests = []
+    for name, data, f_rng, _ in data_sets[3:]:
+        if remove_var_24:
+            data = data[:-1, :]
+        data = cva.add_lagged_samples(data, lagged_samples=lagged_samples)
+        f_rng = [x - lagged_samples for x in f_rng]
+        tests.append([name, data, f_rng])
+
+    tests = tests[0:1]
 
     """Preprocess Data"""
     m = X.shape[0]
@@ -74,7 +111,7 @@ if __name__ == "__main__":
     X = X - X_mean
     X_std = np.std(X, axis=1).reshape((-1, 1))
     X = X / X_std
-    Me = m - Md
+    Me = [m - x for x in Md]
 
     """Train Model"""
     sfa_object = sfa.SFA()
@@ -89,10 +126,15 @@ if __name__ == "__main__":
             Omega_inv_ssfa = np.load(f)
             W_mssfa = np.load(f)
             Omega_inv_mssfa = np.load(f)
+        with open('cva_spca.pkl', 'rb') as f:
+            spca = pickle.load(f)
     else:
-        W_sfa, Omega_inv_sfa = sfa_object.run(X, Md)
-        W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md)
-        W_mssfa, Omega_inv_mssfa, _, _, _ = mssfa_object.run(X, Md)
+        W_sfa, Omega_inv_sfa = sfa_object.run(X, Md[0])
+        W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md[1])
+        spca = SparsePCA(n_components=Md[2], max_iter=500, tol=1e-6)
+        W_mssfa, Omega_inv_mssfa, _, _, _ = mssfa_object.run(X, Md[3])
+        spca.fit(X.T)
+        print(f"SPCA converged in {spca.n_iter_} iterations")
         with open('cva_models_matrix.npy', 'wb') as f:
             np.save(f, W_sfa)
             np.save(f, Omega_inv_sfa)
@@ -100,62 +142,58 @@ if __name__ == "__main__":
             np.save(f, Omega_inv_ssfa)
             np.save(f, W_mssfa)
             np.save(f, Omega_inv_mssfa)
+        with open('cva_spca.pkl', 'wb') as f:
+            pickle.dump(spca, f)
     Lambda_inv_ssfa = np.linalg.pinv(W_ssfa.T @ W_ssfa)
 
-    spca = SparsePCA(n_components=Md, max_iter=500, tol=1e-6)
-    spca.fit(X.T)
-    print(f"SPCA converged in {spca.n_iter_} iterations")
     P = spca.components_.T
-    P_d = P[:, :Md]
-    P_e = P[:, Md:]
-    scores_d = X.T @ P_d
+    P_d = P[:, :Md[2]]
+    P_e = P[:, Md[2]:]
+    scores_d = spca.transform(X.T)
+    # scores_d = X.T @ P_d
     scores_e = X.T @ P_e
     gamma_inv_d = np.linalg.inv(np.cov(scores_d.T))
     gamma_inv_e = np.linalg.inv(np.cov(scores_e.T))
 
     results = []
-    for name, test_data, fault_samples in tests:
+    for name, test_data, fault_range in tests:
         X_test = ((test_data - X_mean) / X_std)
+        n_test = X_test.shape[1]
         X_cont = X_test[:, fd_samples]
 
         Y_sfa = (W_sfa.T @ X_test)
-        stats_sfa = fd.calculate_test_stats(Y_sfa, Md, Omega_inv_sfa)
+        stats_sfa = fd.calculate_test_stats(Y_sfa, Md[0], Omega_inv_sfa)
         conts_sfa = fd.calculate_fault_contributions(X_cont, W_sfa.T,
                                                      Omega_inv_sfa,
-                                                     Md, fd_method)
+                                                     Md[0], fd_method)
 
         Y_ssfa = (W_ssfa.T @ X_test)
-        stats_ssfa = fd.calculate_test_stats(Y_ssfa, Md, Omega_inv_ssfa)
+        stats_ssfa = fd.calculate_test_stats(Y_ssfa, Md[1], Omega_inv_ssfa)
         conts_ssfa = fd.calculate_fault_contributions(X_cont, W_ssfa.T,
                                                       Omega_inv_ssfa,
-                                                      Md, fd_method)
+                                                      Md[1], fd_method)
 
         stats_spca = fd.calculate_test_stats_pca(X_test.T, P, gamma_inv_d,
-                                                 gamma_inv_e, Md)
+                                                 gamma_inv_e, Md[2])
         conts_spca = fd.calculate_fault_contributions_pca(X_cont.T, P,
                                                           gamma_inv_d,
-                                                          gamma_inv_e, Md)
+                                                          gamma_inv_e, Md[2])
 
         Y_mssfa = (W_mssfa.T @ X_test)
-        stats_mssfa = fd.calculate_test_stats(Y_mssfa, Md, Omega_inv_mssfa)
+        stats_mssfa = fd.calculate_test_stats(Y_mssfa, Md[3], Omega_inv_mssfa)
         conts_mssfa = fd.calculate_fault_contributions(X_cont, W_mssfa.T,
                                                        Omega_inv_mssfa,
-                                                       Md, fd_method)
-        for i in range(X_test.shape[1]):
-            stats_ssfa[0][i] = (Y_ssfa[:Md, i].T @ Lambda_inv_ssfa[:Md, :Md]
-                                @ Y_ssfa[:Md, i])
-            stats_ssfa[1][i] = (Y_ssfa[Md:, i].T @ Lambda_inv_ssfa[Md:, Md:]
-                                @ Y_ssfa[Md:, i])
+                                                       Md[3], fd_method)
+        for i in range(n_test):
+            stats_ssfa[0][i] = (Y_ssfa[:Md[1], i].T
+                                @ Lambda_inv_ssfa[:Md[1], :Md[1]]
+                                @ Y_ssfa[:Md[1], i])
 
-        results.append((name, fault_samples,
+        results.append((name, fault_range,
                         stats_sfa, conts_sfa,
                         stats_ssfa, conts_ssfa,
                         stats_spca, conts_spca,
                         stats_mssfa, conts_mssfa))
-
-    Tdc, Tec, Sdc, Sec = fd.calculate_crit_values(n, Md, Me, alpha)
-    Tdc_pca, Tec_pca, SPEd, SPEe = fd.calculate_crit_values_pca(X.T, P, n, Md,
-                                                                Me, alpha)
 
     index_labels = [
         'PT312 Air delivery pressure',
@@ -183,71 +221,42 @@ if __name__ == "__main__":
         'PO1 Water pump current',
         'PT417 Pressure in mixture zone 2” line'
     ]
-    # lagged_labels = []
-    # for i in range(1, lagged_samples + 1):
-    #     for lbl in index_labels:
-    #         # lagged_labels.append(f"{lbl} (t - {i})")
-    #         lagged_labels.append(lbl)
-    # index_labels += lagged_labels
+    lagged_labels = []
+    for i in range(1, lagged_samples + 1):
+        for lbl in index_labels:
+            # lagged_labels.append(f"{lbl} (t - {i})")
+            lagged_labels.append(lbl)
+    index_labels += lagged_labels
 
-    for (name, f_samples, stats_sfa, conts_sfa, stats_ssfa, conts_ssfa,
+    for (idv_name, fault_range, stats_sfa, conts_sfa, stats_ssfa, conts_ssfa,
          stats_spca, conts_spca, stats_mssfa, conts_mssfa) in results:
         """Plot Stats"""
-        _f, axs2d = plt.subplots(nrows=2, ncols=1, sharex=True)
-        _f.set_size_inches(16, 9)
 
-        Td_plot = axs2d[0]
-        Td_plot.set_title(f"{name} Test Statistics", fontsize=20)
-        Td_plot.set_ylabel("$T^2$", fontsize=20)
-        Td_plot.plot(stats_sfa[0], label='SFA')
-        Td_plot.plot(stats_ssfa[0], label='Sparse SFA')
-        Td_plot.plot(stats_mssfa[0], label='Manifold Sparse SFA')
-        Td_plot.plot([Tdc] * len(stats_sfa[0]), 'k')
-        Td_plot.legend(loc='upper left', handlelength=4, fontsize=15)
-        Td_plot.tick_params(axis='both', which='major', labelsize=15)
+        data_to_plot = [("SFA", stats_sfa, conts_sfa),
+                        ("SSFA", stats_ssfa, conts_ssfa),
+                        ("SPCA", stats_spca, conts_spca),
+                        ("MSSFA", stats_mssfa, conts_mssfa)]
+        for i, (algo, stats, conts) in enumerate(data_to_plot):
+            Tc, _, Sc, _ = fd.calculate_crit_values(n, Md[i], Me[i], alpha)
+            if algo == "SPCA":
+                Tc, _, Sc, _ = fd.calculate_crit_values_pca(X.T, P, n,
+                                                            Md[i], Me[i],
+                                                            alpha)
+            _f, axs2d = plot_test_stats(algo, idv_name,
+                                        stats[0], Tc,
+                                        stats[2], Sc)
+            axs2d[0].set_yscale('log')
+            axs2d[1].set_yscale('log')
+            for vert_line in fault_range:
+                axs2d[0].axvline(x=vert_line, color='k', linestyle='--')
+                axs2d[1].axvline(x=vert_line - 1, color='k', linestyle='--')
 
-        Sd_plot = axs2d[1]
-        Sd_plot.set_ylabel("$S^2$", fontsize=20)
-        Sd_plot.plot(stats_sfa[2], label='SFA')
-        Sd_plot.plot(stats_ssfa[2], label='Sparse SFA')
-        Sd_plot.plot(stats_mssfa[2], label='Manifold Sparse SFA')
-        Sd_plot.plot([Sdc] * len(stats_sfa[2]), 'k')
-        Sd_plot.legend(loc='upper left', handlelength=4, fontsize=15)
-        Sd_plot.set_xlabel("Sample", fontsize=20)
-        Sd_plot.tick_params(axis='both', which='major', labelsize=15)
+            if algo == "SPCA":
+                axs2d[1].set_ylabel("SPE", fontsize=20)
+            plt.savefig(f'plots/CS/{algo}_{idv_name}_stats.png', dpi=350)
+            plt.close(fig=_f)
+            _f = None
 
-        _f.set_tight_layout(True)
-        plt.savefig(f'plots/CVA/{name}_stats.png', dpi=350)
-        plt.close(fig=_f)
-        _f = None
-
-        _f_spca, axs2d_spca = plt.subplots(nrows=2, ncols=1, sharex=True)
-        _f_spca.set_size_inches(16, 9)
-
-        Td_spca_plot = axs2d_spca[0]
-        Td_spca_plot.set_title(f"{name} Test Statistics", fontsize=20)
-        Td_spca_plot.set_ylabel("$T^2$", fontsize=20)
-        Td_spca_plot.plot(stats_spca[0], label='Sparse PCA')
-        Td_spca_plot.plot([Tdc_pca] * len(stats_spca[0]), 'k')
-        Td_spca_plot.legend(loc='upper left', handlelength=4, fontsize=15)
-        Td_spca_plot.tick_params(axis='both', which='major', labelsize=15)
-
-        Sd_spca_plot = axs2d_spca[1]
-        Sd_spca_plot.set_ylabel("SPE", fontsize=20)
-        Sd_spca_plot.plot(stats_spca[2], label='Sparse PCA')
-        Sd_spca_plot.plot([SPEd] * len(stats_sfa[2]), 'k')
-        Sd_spca_plot.legend(loc='upper left', handlelength=4, fontsize=15)
-        Sd_spca_plot.set_xlabel("Sample", fontsize=20)
-        Sd_spca_plot.tick_params(axis='both', which='major', labelsize=15)
-
-        _f_spca.set_tight_layout(True)
-        plt.savefig(f'plots/CVA/{name}_stats_spca.png', dpi=350)
-        plt.close(fig=_f_spca)
-        _f_spca = None
-
-        for model_name, conts in zip(["SFA", "SSFA", "SPCA", "MSSFA"],
-                                     [conts_sfa, conts_ssfa,
-                                      conts_spca, conts_mssfa]):
             # Get largest contribution for each variable in specified range
             max_T = np.max(conts[0], axis=1)
             max_S = np.max(conts[2], axis=1)
@@ -266,15 +275,14 @@ if __name__ == "__main__":
             _f.set_size_inches(16, 9)
 
             # Reindex to match up with data sample numbers
-            # indices_T = [i + lagged_samples + 1 for i in fd_samples]
-            indices_T = [i + 2 for i in fd_samples[1:]]
+            indices_T = [i + lagged_samples + 1 for i in fd_samples]
+            indices_T = indices_T[1:]
             T_plot = conts[0][:, 1:]
-            if model_name == "SPCA":
+            if algo == "SPCA":
                 indices_S = indices_T.copy()
                 S_plot = conts[2][:, 1:]
             else:
-                # indices_S = [i + lagged_samples + 2 for i in fd_samples[:-1]]
-                indices_S = [i + 2 for i in fd_samples[:-1]]
+                indices_S = [i + lagged_samples + 2 for i in fd_samples[:-1]]
                 S_plot = conts[2]
 
             # Plot the contributions
@@ -285,21 +293,21 @@ if __name__ == "__main__":
                 ax[1, 0].plot(indices_S, S_plot[index, :], **styles[index],
                               label=index_labels[index])
 
-            ax[0, 0].set_title(f"{model_name} Top {n_to_plot} $T^2$ "
-                               f"Contributors for {name}",
+            ax[0, 0].set_title(f"{algo} Top {n_to_plot} $T^2$ "
+                               f"Contributors for {idv_name}",
                                fontsize=20)
             ax[0, 0].set_ylabel('$T^2$ Contribution', fontsize=20)
             ax[0, 0].set_xticks(indices_T)
             ax[0, 0].tick_params(axis='both', which='major', labelsize=15)
 
-            if name == "SPCA":
-                ax[1, 0].set_title(f"{model_name} Top {n_to_plot} SPE "
-                                   f"Contributors for {name}",
+            if algo == "SPCA":
+                ax[1, 0].set_title(f"{algo} Top {n_to_plot} SPE "
+                                   f"Contributors for {idv_name}",
                                    fontsize=20)
                 ax[1, 0].set_ylabel('SPE Contribution', fontsize=20)
             else:
-                ax[1, 0].set_title(f"{model_name} Top {n_to_plot} $S^2$ "
-                                   f"Contributors for {name}",
+                ax[1, 0].set_title(f"{algo} Top {n_to_plot} $S^2$ "
+                                   f"Contributors for {idv_name}",
                                    fontsize=20)
                 ax[1, 0].set_ylabel('$S^2$ Contribution', fontsize=20)
             ax[1, 0].set_xticks(indices_S)
@@ -332,7 +340,22 @@ if __name__ == "__main__":
             labels, lines = zip(*sorted(zip(labels, lines)))
             labels = list(labels)
             lines = list(lines)
+            for i in range(len(lines)):
+                lines[i] = Line2D([0], [0], color=lines[i]._color,
+                                  markersize=lines[i]._markersize,
+                                  marker=lines[i]._marker._marker,
+                                  fillstyle=lines[i]._marker._fillstyle,
+                                  linestyle='None')
             # Add lines for lagged samples
+            for i in range(lagged_samples + 1):
+                if i > 0:
+                    time = f't - {i}'
+                else:
+                    time = 't'
+                labels.append(f'Time = {time}')
+                lines.append(Line2D([0], [0],
+                             color='black',
+                             linestyle=linestyles[i]))
             gs = ax[0, 1].get_gridspec()
             ax[0, 1].remove()
             ax[1, 1].remove()
@@ -343,5 +366,5 @@ if __name__ == "__main__":
 
             _f.set_tight_layout(True)
 
-            plt.savefig(f'plots/CVA/{name}_{model_name}_FD.png', dpi=350)
+            plt.savefig(f'plots/CVA/{idv_name}_{algo}_FD.png', dpi=350)
             plt.close(fig=_f)

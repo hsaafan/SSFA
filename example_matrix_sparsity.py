@@ -9,9 +9,9 @@ from sklearn.decomposition import SparsePCA
 import tepimport
 
 if __name__ == "__main__":
-    load_ssfa = True
+    load_ssfa = False
     alpha = 0.01
-    Md = 55  # How many to calculate
+    Md = [55, 74, 48, 85]
     lagged_samples = 2
     thresholds = [10 ** (-x) for x in range(13)]
     thresholds.append(0)
@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
     """Train Models"""
     sfa_object = methods.SFA()
-    W_sfa, Omega_inv_sfa = sfa_object.run(X, Md)
+    W_sfa, Omega_inv_sfa = sfa_object.run(X, Md[0])
 
     ssfa_object = ssfa.SSFA()
     if load_ssfa:
@@ -40,10 +40,10 @@ if __name__ == "__main__":
             W_ssfa = np.load(f)
             Omega_inv_ssfa = np.load(f)
     else:
-        W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md)
+        W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md[1])
     Lambda_inv_ssfa = np.linalg.pinv(W_ssfa.T @ W_ssfa)
 
-    spca = SparsePCA(n_components=Md, max_iter=500, tol=1e-6)
+    spca = SparsePCA(n_components=Md[2], max_iter=500, tol=1e-6)
     T = spca.fit_transform(X.T)
     P_spca = spca.components_.T
     print(f"SPCA converged in {spca.n_iter_} iterations")
@@ -51,7 +51,7 @@ if __name__ == "__main__":
     Lambda_inv_spca = np.diag(np.diag(Lambda_spca) ** -1)
 
     mssfa_object = mssfa.MSSFA("chol", "l1")
-    W_mssfa, Omega_inv_mssfa, _, _, _ = mssfa_object.run(X, Md)
+    W_mssfa, Omega_inv_mssfa, _, _, _ = mssfa_object.run(X, Md[3])
 
     """Sparsity Calculation"""
     sfa_sparse = np.abs(W_sfa) / np.abs(W_sfa).sum(axis=0, keepdims=1)

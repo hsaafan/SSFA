@@ -2,32 +2,36 @@ import src.sfamanopt.mssfa as mssfa
 import src.sfamanopt.ssfa as ssfa
 import src.sfamanopt.sfa as sfa
 import src.sfamanopt.fault_diagnosis as fd
+import src.sfamanopt.load_cva as cva
 
 import numpy as np
-import matplotlib.pyplot as plt
 from sklearn.decomposition import SparsePCA
 
-import tepimport
+import pickle
 
 if __name__ == "__main__":
-    load_ssfa = False
+    load_models = False
+    remove_var_24 = True
     alpha = 0.01
-    Md = [55, 74, 48, 85]
+    # Md = [27, 123, 135, 14]
+    # lagged_samples = 5
+    Md = [17, 61, 8, 14]
     lagged_samples = 2
-    idv = range(22)
     """Import Data"""
-    ignored_var = list(range(22, 41))
-    X = tepimport.import_sets([0], skip_test=True)[0][1]
-    X = tepimport.add_lagged_samples(np.delete(X, ignored_var, axis=0),
-                                     lagged_samples)
+    data_sets_unlagged = cva.import_sets(lagged_samples=0)
+    X = np.hstack([x[1] for x in data_sets_unlagged[1:3]])
+    if remove_var_24:
+        X = X[:-1, :]
+    X = cva.add_lagged_samples(X, lagged_samples=lagged_samples)
 
-    test_sets = tepimport.import_sets(idv, skip_training=True)
+    data_sets = cva.import_sets(lagged_samples=0)
     tests = []
-    for name, data in test_sets:
-        data = np.delete(data, ignored_var, axis=0)
-        data = tepimport.add_lagged_samples(data, lagged_samples)
-        tests.append((name, data))
-    n_test = tests[0][1].shape[1]
+    for name, data, f_rng, _ in data_sets[3:]:
+        if remove_var_24:
+            data = data[:-1, :]
+        data = cva.add_lagged_samples(data, lagged_samples=lagged_samples)
+        f_rng = [x - lagged_samples for x in f_rng]
+        tests.append([name, data, f_rng])
 
     """Preprocess Data"""
     m = X.shape[0]
@@ -40,34 +44,50 @@ if __name__ == "__main__":
 
     """Train Model"""
     sfa_object = sfa.SFA()
-    W_sfa, Omega_inv_sfa = sfa_object.run(X, Md[0])
-
     ssfa_object = ssfa.SSFA()
-    if load_ssfa:
-        with open('ssfa_matrix.npy', 'rb') as f:
+    mssfa_object = mssfa.MSSFA("chol", "l1")
+
+    if load_models:
+        with open('cva_models_matrix.npy', 'rb') as f:
+            W_sfa = np.load(f)
+            Omega_inv_sfa = np.load(f)
             W_ssfa = np.load(f)
             Omega_inv_ssfa = np.load(f)
+            W_mssfa = np.load(f)
+            Omega_inv_mssfa = np.load(f)
+        with open('cva_spca.pkl', 'rb') as f:
+            spca = pickle.load(f)
     else:
+        W_sfa, Omega_inv_sfa = sfa_object.run(X, Md[0])
         W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md[1])
+        spca = SparsePCA(n_components=Md[2], max_iter=500, tol=1e-6)
+        spca.fit(X.T)
+        print(f"SPCA converged in {spca.n_iter_} iterations")
+        W_mssfa, Omega_inv_mssfa, _, _, _ = mssfa_object.run(X, Md[3])
+        with open('cva_models_matrix.npy', 'wb') as f:
+            np.save(f, W_sfa)
+            np.save(f, Omega_inv_sfa)
+            np.save(f, W_ssfa)
+            np.save(f, Omega_inv_ssfa)
+            np.save(f, W_mssfa)
+            np.save(f, Omega_inv_mssfa)
+        with open('cva_spca.pkl', 'wb') as f:
+            pickle.dump(spca, f)
     Lambda_inv_ssfa = np.linalg.pinv(W_ssfa.T @ W_ssfa)
 
-    spca = SparsePCA(n_components=Md[2], max_iter=500, tol=1e-6)
-    spca.fit(X.T)
-    print(f"SPCA converged in {spca.n_iter_} iterations")
     P = spca.components_.T
     P_d = P[:, :Md[2]]
     P_e = P[:, Md[2]:]
-    scores_d = X.T @ P_d
+    scores_d = spca.transform(X.T)
+    # scores_d = X.T @ P_d
     scores_e = X.T @ P_e
     gamma_inv_d = np.linalg.inv(np.cov(scores_d.T))
     gamma_inv_e = np.linalg.inv(np.cov(scores_e.T))
 
-    mssfa_object = mssfa.MSSFA("chol", "l1")
-    W_mssfa, Omega_inv_mssfa, _, _, _ = mssfa_object.run(X, Md[3])
-
     results = []
-    for name, test_data in tests:
+    for name, test_data, f_rng in tests:
         X_test = ((test_data - X_mean) / X_std)
+        n_test = X_test.shape[1]
         Y_sfa = (W_sfa.T @ X_test)
         Y_ssfa = (W_ssfa.T @ X_test)
         Y_spca = spca.transform(X_test.T).T
@@ -85,16 +105,14 @@ if __name__ == "__main__":
 
         stats_mssfa = fd.calculate_test_stats(Y_mssfa, Md[3], Omega_inv_mssfa)
 
-        results.append((name, stats_sfa, stats_ssfa, stats_spca, stats_mssfa))
+        results.append((name, f_rng, stats_sfa, stats_ssfa,
+                        stats_spca, stats_mssfa))
 
     fdr_results = []
-    for name, stats_sfa, stats_ssfa, stats_spca, stats_mssfa in results:
-        T_fault_index = 160 - lagged_samples
-        S_fault_index = 159 - lagged_samples
-
-        idv_results = [name]
+    for name, fault_range, s_sfa, s_ssfa, s_spca, s_mssfa in results:
+        cva_results = [name]
         stats = zip(["SFA", "SSFA", "SPCA", "MSSFA"],
-                    [stats_sfa, stats_ssfa, stats_spca, stats_mssfa])
+                    [s_sfa, s_ssfa, s_spca, s_mssfa])
         for method, (Td, Te, Sd, Se) in stats:
             if method == "SPCA":
                 crit_val, _, _, _ = fd.calculate_crit_values_pca(X.T, P, n,
@@ -109,17 +127,21 @@ if __name__ == "__main__":
                     i = 3
                 crit_val, _, _, _ = fd.calculate_crit_values(n, Md[i],
                                                              Me[i], alpha)
-            if name == "IDV(0)":
-                FDR = 0
-                FAR = np.count_nonzero(Td > crit_val) / len(Td)
-            else:
-                FDR = (np.count_nonzero(Td[T_fault_index:] > crit_val)
-                       / (len(Td) - T_fault_index))
-                FAR = (np.count_nonzero(Td[:T_fault_index] > crit_val)
-                       / T_fault_index)
-            idv_results.append(FDR)
-            idv_results.append(FAR)
-        fdr_results.append(idv_results)
+            fault_indices = []
+            for i in range(1, len(fault_range)):
+                fault_indices += list(range(fault_range[i-1], fault_range[i]))
+            n_faults = len(fault_indices)
+
+            FDR = (np.count_nonzero(Td[fault_indices] > crit_val)
+                   / n_faults)
+
+            normal_data = np.delete(Td, fault_indices)
+            false_alarms = np.count_nonzero(normal_data > crit_val)
+            FAR = false_alarms / (len(Td) - n_faults)
+
+            cva_results.append(FDR)
+            cva_results.append(FAR)
+        fdr_results.append(cva_results)
 
     latex_text = ""
     for (name, fdr_sfa, far_sfa,
