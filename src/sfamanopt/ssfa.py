@@ -80,8 +80,10 @@ class SSFA:
             max_iter: int = 500,
             err_tol: float = 1e-6,
             sparse_pcnt: float = 0.01,
-            reorder_by_speed: bool = True):
-        print("Starting SSFA...")
+            reorder_by_speed: bool = True,
+            verbose: bool = False):
+        if verbose:
+            print('Starting SSFA...')
         m, n = X.shape
         D = construct_finite_difference_matrix(n)
 
@@ -149,14 +151,16 @@ class SSFA:
             relative_errors.append(rel_error)
             cost_values.append(cost)
             if rel_error < err_tol:
-                print(f"Converged in {k} iterations with "
-                      f"relative error of {rel_error}")
+                if verbose:
+                    print(f"Converged in {k} iterations with "
+                          f"relative error of {rel_error}")
                 converged = True
                 break
-        if not converged:
+        if not converged and verbose:
             print(f"Reached max iterations ({max_iter}) without converging, "
                   f"with final relative error of {rel_error}")
-        print(f'Slowest Feature: {np.min(np.diag(W.T @ B @ W))}')
+        if verbose:
+            print(f'Slowest Feature: {np.min(np.diag(W.T @ B @ W))}')
 
         if reorder_by_speed:
             Y = W.T @ X.T
