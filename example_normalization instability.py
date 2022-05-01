@@ -65,25 +65,28 @@ if __name__ == "__main__":
     """Plot the comparison"""
     _f, axs2d = plt.subplots(nrows=2, ncols=2, sharex='col', sharey='row')
     _f.set_size_inches(21, 9)
-    fontsize = 24
+    fontsize = 20
 
-    mssfa_plot = axs2d[0][0]
-    mssfa_plot.set_title(f"Unnormalized Inputs", fontsize=fontsize)
-    mssfa_plot.set_ylabel("Sparse SFA $T^2$", fontsize=fontsize)
-    mssfa_plot.plot(T_sqr[0, :])
+    ssfa_plot = axs2d[0][0]
+    ssfa_plot.set_title(f"Unnormalized Inputs", fontsize=fontsize)
+    ssfa_plot.set_ylabel("Sparse SFA $T^2$", fontsize=fontsize)
+    ssfa_plot.tick_params(axis='y', which='major', labelsize=15)
+    ssfa_plot.plot(T_sqr[0, :])
 
-    mssfa_plot_norm = axs2d[0][1]
-    mssfa_plot_norm.set_title(f"Normalized Inputs", fontsize=fontsize)
-    mssfa_plot_norm.plot(T_sqr[1, :])
+    ssfa_plot_norm = axs2d[0][1]
+    ssfa_plot_norm.set_title(f"Normalized Inputs", fontsize=fontsize)
+    ssfa_plot_norm.plot(T_sqr[1, :])
 
-    ssfa_plot = axs2d[1][0]
-    ssfa_plot.set_ylabel("Manifold Sparse SFA $T^2$", fontsize=fontsize)
-    ssfa_plot.set_xlabel("Sample", fontsize=fontsize)
-    ssfa_plot.plot(T_sqr[2, :])
+    mssfa_plot = axs2d[1][0]
+    mssfa_plot.set_ylabel("Manifold Sparse SFA $T^2$", fontsize=fontsize)
+    mssfa_plot.set_xlabel("Sample", fontsize=fontsize)
+    mssfa_plot.tick_params(axis='both', which='major', labelsize=15)
+    mssfa_plot.plot(T_sqr[2, :])
 
-    ssfa_plot_norm = axs2d[1][1]
-    ssfa_plot_norm.set_xlabel("Sample", fontsize=fontsize)
-    ssfa_plot_norm.plot(T_sqr[3, :])
+    mssfa_plot_norm = axs2d[1][1]
+    mssfa_plot_norm.set_xlabel("Sample", fontsize=fontsize)
+    mssfa_plot_norm.tick_params(axis='x', which='major', labelsize=15)
+    mssfa_plot_norm.plot(T_sqr[3, :])
 
     _f.set_tight_layout(True)
     plt.savefig(f"plots/normalized_comparison.png", dpi=350)

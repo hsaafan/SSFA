@@ -11,7 +11,7 @@ import tepimport
 if __name__ == "__main__":
     load_ssfa = False
     alpha = 0.01
-    Md = [55, 74, 48, 85]
+    Md = [55, 55, 55, 55]
     lagged_samples = 2
     thresholds = [10 ** (-x) for x in range(13)]
     thresholds.append(0)
@@ -149,31 +149,37 @@ if __name__ == "__main__":
         ssfa_S = np.count_nonzero(np.isnan(im_ssfa)) / np.size(im_ssfa)
         spca_S = np.count_nonzero(np.isnan(im_spca)) / np.size(im_spca)
         mssfa_S = np.count_nonzero(np.isnan(im_mssfa))/np.size(im_mssfa)
-        axim[0].set_title(f"SFA ({sfa_S:.3f})")
-        axim[1].set_title(f"Sparse SFA ({ssfa_S:.3f})")
-        axim[2].set_title(f"Sparse PCA ({spca_S:.3f})")
-        axim[3].set_title(f"Manifold Sparse SFA ({mssfa_S:.3f})")
+        axim[0].set_title(f"SFA ({sfa_S:.3f})", fontsize=20)
+        axim[1].set_title(f"SSFA ({ssfa_S:.3f})", fontsize=20)
+        axim[2].set_title(f"SPCA ({spca_S:.3f})", fontsize=20)
+        axim[3].set_title(f"MSSFA ({mssfa_S:.3f})", fontsize=20)
 
         axim[0].imshow(np.abs(im_sfa))
         axim[1].imshow(np.abs(im_ssfa))
         axim[2].imshow(np.abs(im_spca))
         im = axim[3].imshow(np.abs(im_mssfa))
 
-        axim[0].set_ylabel("Input Signal")
-        axim[0].set_xlabel("Feature")
-        axim[1].set_xlabel("Feature")
-        axim[2].set_xlabel("Component")
-        axim[3].set_xlabel("Feature")
+        axim[0].set_ylabel("Input Signal", fontsize=20)
+        axim[0].set_xlabel("Feature", fontsize=20)
+        axim[1].set_xlabel("Feature", fontsize=20)
+        axim[2].set_xlabel("Component", fontsize=20)
+        axim[3].set_xlabel("Feature", fontsize=20)
 
-        _f_sparse.colorbar(im, ax=axim, aspect=60)
+        for i in range(4):
+            axim[i].tick_params(axis='both', which='major', labelsize=15)
+
+        cbar = _f_sparse.colorbar(im, ax=axim, aspect=60)
+        cbar.ax.tick_params(labelsize=15)
 
         if threshold == 0:
             magnitude = 0
-            _f_sparse.text(0.2, 0.95, f'J = {Md} | Threshold = 0', fontsize=24)
+            text = f'J = {Md} | Threshold = 0'
+            # _f_sparse.text(0.2, 0.95, text, fontsize=24)
         else:
             magnitude = int(np.abs(np.floor(np.log10(threshold))))
-            _f_sparse.text(0.2, 0.95, f'J = {Md} | Threshold = 1e-{magnitude}',
-                           fontsize=24)
+            text = f'J = {Md} | Threshold = 1e-{magnitude}'
+            # _f_sparse.text(0.2, 0.95, text, fontsize=24)
+
         plt.savefig(f"plots/Sparsity/Sparsity_comparison_{magnitude}.png",
                     dpi=350)
         plt.close(fig=_f_sparse)
