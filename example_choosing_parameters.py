@@ -93,9 +93,12 @@ if __name__ == "__main__":
                 max_lag[1] = lag
 
             W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md_ssfa)
+            Lambda_inv_ssfa = np.linalg.pinv(W_ssfa.T @ W_ssfa)
             T_ssfa = (W_ssfa.T @ T0)
-            stats_ssfa = fd.calculate_test_stats(T_ssfa, Md_ssfa,
-                                                 Omega_inv_ssfa)
+            stats_ssfa = [[0] * T0.shape[1]]
+            for i in range(T0.shape[1]):
+                stats_ssfa[0][i] = (T_ssfa[:, i].T @ Lambda_inv_ssfa
+                                    @ T_ssfa[:, i])
             T2c, _, _, _ = fd.calculate_crit_values(n, Md_ssfa, m - Md_ssfa,
                                                     alpha)
             FAR[1].append(np.sum(stats_ssfa[0] > T2c) / T0.shape[1])
