@@ -72,6 +72,7 @@ if __name__ == "__main__":
             if np.any(speeds_sfa < degenerate_speed):
                 max_lag[0] = lag
 
+            W_sfa, Omega_inv_sfa = sfa_object.run(X, Md_sfa)
             T_sfa = (W_sfa.T @ T0)
             stats_sfa = fd.calculate_test_stats(T_sfa, Md_sfa, Omega_inv_sfa)
             T2c, _, _, _ = fd.calculate_crit_values(n, Md_sfa, m - Md_sfa,
@@ -91,6 +92,7 @@ if __name__ == "__main__":
             if np.any(speeds_ssfa < degenerate_speed):
                 max_lag[1] = lag
 
+            W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md_ssfa)
             T_ssfa = (W_ssfa.T @ T0)
             stats_ssfa = fd.calculate_test_stats(T_ssfa, Md_ssfa,
                                                  Omega_inv_ssfa)
@@ -112,6 +114,8 @@ if __name__ == "__main__":
                 if np.any(speeds_mssfa < degenerate_speed):
                     max_lag[2] = lag
 
+                W_mssfa, Omega_inv_mssfa, _, _, _ = mssfa_object.run(X,
+                                                                     Md_mssfa)
                 T_mssfa = (W_mssfa.T @ T0)
                 stats_mssfa = fd.calculate_test_stats(T_mssfa, Md_mssfa,
                                                       Omega_inv_mssfa)
