@@ -1,13 +1,11 @@
 """ Choose the lag number and the number of SF/PC kept """
-import src.sfamanopt.mssfa as mssfa
-import src.sfamanopt.ssfa as ssfa
-import src.sfamanopt.sfa as sfa
+from src.sfamanopt import incmssfa
+from SlowFeatureAnalysis.src.sfafd import incsfa, rsfa
 import src.sfamanopt.load_cva as cva
 import src.sfamanopt.fault_diagnosis as fd
 
 import numpy as np
 import scipy
-from sklearn.decomposition import SparsePCA
 
 import tepimport
 from math import floor
@@ -72,15 +70,13 @@ def calculate_FAR_FDR(Y_V: np.ndarray, Y_T: np.ndarray,
 
 def choose_parameters(training_set: np.ndarray, validation_set: np.ndarray,
                       test_set: np.ndarray, fault_indices: list, min_lag: int,
-                      max_lag: int, speed_kept: float, variance_kept: float,
-                      alpha: float, skip_sfa: bool = False,
-                      skip_ssfa: bool = False, skip_mssfa: bool = False,
-                      skip_spca: bool = False, verbose: bool = True,
+                      max_lag: int, speed_kept: float, alpha: float,
+                      skip_rsfa: bool = False, skip_incsfa: bool = False,
+                      skip_incmssfa: bool = False, verbose: bool = True,
                       continuous_print: bool = False):
-    results_sfa = []
-    results_ssfa = []
-    results_mssfa = []
-    results_spca = []
+    results_rsfa = []
+    results_incsfa = []
+    results_incmssfa = []
 
     for lag in range(min_lag, max_lag + 1):
         message(f"Testing lag = {lag}", verbose)
@@ -100,134 +96,90 @@ def choose_parameters(training_set: np.ndarray, validation_set: np.ndarray,
         n_test = T.shape[1]
         while fault_indices[-1] >= n_test:
             fault_indices = fault_indices[:-1]
+
         upper_speed = upper_quantile_x_speed(X, 1 - speed_kept)
 
         """Train Models"""
-        if not skip_sfa:
-            message('    Testing SFA', verbose)
-            sfa_object = sfa.SFA()
-            W, _ = sfa_object.run(X, m)
+        if not skip_rsfa:
+            message('    Testing RSFA', verbose)
+            rsfa_object = rsfa.RSFA(m, m, m, 2, conv_tol=0)
+            Y = np.zeros((m, n))
+            for i in range(n):
+                y, _, _ = rsfa_object.add_data(X[:, i])
+                Y[:, i] = y.flat
+            W = (rsfa_object.standardization_node.whitening_matrix
+                 @ rsfa_object.transformation_matrix)
+            Y = W.T @ X
+            Md = calculate_Md(Y, n, upper_speed)
+            Me = m - Md
+
+            T2c = fd.calculate_crit_values(n, Md, Me, alpha)[0]
+            W = W[:, :Md]
+            Y_V = (W.T @ V)
+            Y_T = (W.T @ T)
+
+            metrics = calculate_FAR_FDR(Y_V, Y_T, T2c, fault_indices)
+            results_rsfa.append([Md, metrics[0], metrics[1], metrics[2]])
+            if continuous_print:
+                print(results_rsfa[-1])
+
+        if not skip_incsfa:
+            message('    Testing IncSFA', verbose)
+            incsfa_object = incsfa.IncSFA(m, m, m, 2, conv_tol=0)
+            Y = np.zeros((m, n))
+            for i in range(n):
+                y, _, _ = incsfa_object.add_data(X[:, i],
+                                                 use_svd_whitening=True)
+                Y[:, i] = y.flat
+            W = (incsfa_object.standardization_node.whitening_matrix
+                 @ incsfa_object.transformation_matrix)
+            Y = W.T @ X
+            Md = calculate_Md(Y, n, upper_speed)
+            Me = m - Md
+
+            T2c = fd.calculate_crit_values(n, Md, Me, alpha)[0]
+            W = W[:, :Md]
+            Y_V = (W.T @ V)
+            Y_T = (W.T @ T)
+
+            metrics = calculate_FAR_FDR(Y_V, Y_T, T2c, fault_indices)
+            results_incsfa.append([Md, metrics[0], metrics[1], metrics[2]])
+            if continuous_print:
+                print(results_incsfa[-1])
+
+        if not skip_incmssfa:
+            message('    Testing IncMSSFA', verbose)
+            incmssfa_object = incmssfa.IncMSSFA()
+            W, _, _ = incmssfa_object.run(X, m, L=2)
             Y = (W.T @ X)
             Md = calculate_Md(Y, n, upper_speed)
             Me = m - Md
 
             T2c = fd.calculate_crit_values(n, Md, Me, alpha)[0]
-            W, _ = sfa_object.run(X, Md)
+            W, _, _ = incmssfa_object.run(X, Md, L=2)
             Y_V = (W.T @ V)
             Y_T = (W.T @ T)
 
             metrics = calculate_FAR_FDR(Y_V, Y_T, T2c, fault_indices)
-            results_sfa.append([Md, metrics[0], metrics[1], metrics[2]])
+            results_incmssfa.append([Md, metrics[0], metrics[1], metrics[2]])
             if continuous_print:
-                print(results_sfa[-1])
+                print(results_incmssfa[-1])
 
-        if not skip_ssfa:
-            message('    Testing SSFA', verbose)
-            ssfa_object = ssfa.SSFA()
-            W, _, _, _, _ = ssfa_object.run(X, m)
-            correction = scipy.linalg.sqrtm(np.linalg.pinv(W.T @ W))
-            Y = correction @ (W.T @ X)
-            Md = calculate_Md(Y, n, upper_speed)
-            Me = m - Md
-
-            T2c = fd.calculate_crit_values(n, Md, Me, alpha)[0]
-            W, _, _, _, _ = ssfa_object.run(X, Md)
-            correction = scipy.linalg.sqrtm(np.linalg.pinv(W.T @ W))
-            Y_V = correction @ (W.T @ V)
-            Y_T = correction @ (W.T @ T)
-
-            metrics = calculate_FAR_FDR(Y_V, Y_T, T2c, fault_indices)
-            results_ssfa.append([Md, metrics[0], metrics[1], metrics[2]])
-            if continuous_print:
-                print(results_ssfa[-1])
-
-        if not skip_mssfa:
-            message('    Testing MSSFA', verbose)
-            mssfa_object = mssfa.MSSFA("chol", "l1")
-            try:
-                W, _, _, _ = mssfa_object.run(X, m)
-                Y = (W.T @ X)
-                Md = calculate_Md(Y, n, upper_speed)
-                Me = m - Md
-
-                T2c = fd.calculate_crit_values(n, Md, Me, alpha)[0]
-                W, _, _, _ = mssfa_object.run(X, Md)
-                Y_V = (W.T @ V)
-                Y_T = (W.T @ T)
-
-                metrics = calculate_FAR_FDR(Y_V, Y_T, T2c, fault_indices)
-                results_mssfa.append([Md, metrics[0], metrics[1], metrics[2]])
-                if continuous_print:
-                    print(results_mssfa[-1])
-            except np.linalg.LinAlgError as e:
-                if str(e) == "Matrix is not positive definite":
-                    # The covariance matrix is not positive definite meaning
-                    # the cholesky retraction can't be used
-                    message('        Covariance matrix is positive definite',
-                            verbose)
-                    skip_mssfa = True
-                else:
-                    # For other linear algebra errors, reraise error
-                    raise np.linalg.LinAlgError(str(e))
-
-        if not skip_spca:
-            message('    Testing SPCA', verbose)
-            total_var = np.sum(np.var(X, axis=1))
-            var_threshold = total_var * variance_kept
-            K_min = 1
-            K_max = m
-            while True:
-                # Search for correct K value
-                if K_max - K_min <= 3:
-                    for i in range(K_min, K_max + 1):
-                        spca = SparsePCA(n_components=i, max_iter=500,
-                                         tol=1e-6)
-                        Y = spca.fit_transform(X.T)
-
-                        if np.sum(np.var(Y, axis=0)) >= var_threshold:
-                            K = i
-                            break
-                    break
-                K = floor((K_min + K_max) / 2)
-                spca = SparsePCA(n_components=K, max_iter=500, tol=1e-6)
-                Y = spca.fit_transform(X.T)
-                if np.sum(np.var(Y, axis=0)) >= var_threshold:
-                    K_max = K
-                else:
-                    K_min = K
-
-            P = spca.components_.T
-            T2c = fd.calculate_crit_values_pca(X.T, P, n, K, m - K, alpha)[0]
-
-            scores_X = spca.transform(X.T).T
-            gamma_inv = np.linalg.inv(np.cov(scores_X))
-
-            scores_V = spca.transform(V.T).T
-            scores_T = spca.transform(T.T).T
-
-            metrics = calculate_FAR_FDR(scores_V, scores_T, T2c, fault_indices,
-                                        gamma_inv)
-            results_spca.append([K, metrics[0], metrics[1], metrics[2]])
-            if continuous_print:
-                print(results_spca[-1])
-
-        if np.all(np.asarray([skip_sfa, skip_ssfa, skip_mssfa, skip_spca])):
+        if np.all(np.asarray([skip_rsfa, skip_incsfa, skip_incmssfa])):
             break
         fault_indices = [i - 1 for i in fault_indices]
 
-    return(results_sfa, results_ssfa, results_mssfa, results_spca)
+    return(results_rsfa, results_incsfa, results_incmssfa)
 
 
 if __name__ == '__main__':
     speed_kept = 0.9
-    var_kept = 0.9
     alpha = 0.01
     lag_range = [2, 2]   # [Min, Max] lags to test
-    dataset = 'TEP'      # ['TEP', 'CVA']
-    skip_sfa = True
-    skip_ssfa = True
-    skip_mssfa = False
-    skip_spca = True
+    dataset = 'CVA'      # ['TEP', 'CVA']
+    skip_rsfa = False
+    skip_incsfa = False
+    skip_incmssfa = False
 
     """Import Data"""
     if dataset == 'TEP':
@@ -247,6 +199,6 @@ if __name__ == '__main__':
         fault_indices = np.asarray([i for i in range(*fault_range)])
 
     print(choose_parameters(X, T0, T1, fault_indices, lag_range[0],
-                            lag_range[1], speed_kept, var_kept, alpha,
-                            skip_sfa, skip_ssfa, skip_mssfa, skip_spca,
+                            lag_range[1], speed_kept, alpha,
+                            skip_rsfa, skip_incsfa, skip_incmssfa,
                             continuous_print=True))

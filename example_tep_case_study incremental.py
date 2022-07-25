@@ -3,15 +3,13 @@ Looks at a sample range, and plots the variable contributions over that range.
 Variables are chosen by taking the maximum value of each variable over that
 range and then picking the largest n_to_plot variables.
 """
-import src.sfamanopt.mssfa as mssfa
-import src.sfamanopt.ssfa as ssfa
-import src.sfamanopt.sfa as sfa
+from src.sfamanopt import incmssfa
+from SlowFeatureAnalysis.src.sfafd import incsfa, rsfa
 import src.sfamanopt.fault_diagnosis as fd
 
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from sklearn.decomposition import SparsePCA
 
 import tepimport
 import time
@@ -44,14 +42,13 @@ def plot_test_stats(name: str, idv_name: str,
 
 
 if __name__ == "__main__":
-    load_ssfa = True
     alpha = 0.01
-    Md = [55, 74, 48, 85]
+    Md = [64, 99, 89, 86]
     lagged_samples = 2
     fd_method = 'CDC'
-    fd_samples = [i for i in range(202, 213)]  # Contribution plot samples
+    fd_samples = [i for i in range(152, 163)]  # Contribution plot samples
     n_to_plot = 5  # Contribution plot number of variables to plot
-    idv = [11]
+    idv = [4]
     # Linestyles for the n_to_plot variables
     markers = [(u'#1f77b4', 'o', 'left'),       # XMEAS(01)
                (u'#ff7f0e', 'v', 'full'),       # XMEAS(02)
@@ -118,78 +115,86 @@ if __name__ == "__main__":
     Me = [m - x for x in Md]
 
     """Train Model"""
-    sfa_object = sfa.SFA()
-    start_time = time.time()
-    W_sfa, Omega_inv_sfa = sfa_object.run(X, Md[0])
-    print(f"SFA finished running in {time.time()-start_time} seconds")
+    rsfa_object = rsfa.RSFA(m, Md[0], Md[0], 2, conv_tol=0)
+    incsfa_object = incsfa.IncSFA(m, Md[1], Md[1], 2, conv_tol=0)
+    incsfa_svd_object = incsfa.IncSFA(m, Md[2], Md[2], 2, conv_tol=0)
+    incmssfa_object = incmssfa.IncMSSFA()
 
-    ssfa_object = ssfa.SSFA()
-    if load_ssfa:
-        with open('ssfa_matrix.npy', 'rb') as f:
-            W_ssfa = np.load(f)
-            Omega_inv_ssfa = np.load(f)
-    else:
-        start_time = time.time()
-        W_ssfa, Omega_inv_ssfa, _, _ = ssfa_object.run(X, Md[1])
-        print(f"SSFA finished running in {time.time()-start_time} seconds")
-    Lambda_inv_ssfa = np.linalg.pinv(W_ssfa.T @ W_ssfa)
+    Y_rsfa = np.zeros((Md[0], n))
+    for i in range(n):
+        y, _, _ = rsfa_object.add_data(X[:, i], calculate_monitors=True)
+        Y_rsfa[:, i] = y.flat
+    rsfa_object.converged = True
+    W_rsfa = (rsfa_object.standardization_node.whitening_matrix
+              @ rsfa_object.transformation_matrix)
+    Omega_inv_rsfa = np.diag(rsfa_object.features_speed ** -1)
 
-    start_time = time.time()
-    spca = SparsePCA(n_components=Md[2], max_iter=500, tol=1e-6)
-    spca.fit(X.T)
-    print(f"SPCA converged in {spca.n_iter_} iterations")
-    print(f"SPCA finished running in {time.time()-start_time} seconds")
-    P = spca.components_.T
-    P_d = P[:, :Md[2]]
-    P_e = P[:, Md[2]:]
-    scores_d = X.T @ P_d
-    scores_e = X.T @ P_e
-    gamma_inv_d = np.linalg.inv(np.cov(scores_d.T))
-    gamma_inv_e = np.linalg.inv(np.cov(scores_e.T))
+    Y_incsfa = np.zeros((Md[1], n))
+    for i in range(n):
+        y, _, _ = incsfa_object.add_data(X[:, i], use_svd_whitening=False)
+        Y_incsfa[:, i] = y.flat
+    incsfa_object.converged = True
+    W_incsfa = (incsfa_object.standardization_node.whitening_matrix
+                @ incsfa_object.transformation_matrix)
+    Y_incsfa = W_incsfa.T @ X
+    Y_dot_incsfa = Y_incsfa[:, 1:] - Y_incsfa[:, :-1]
+    speeds = np.diag(Y_dot_incsfa @ Y_dot_incsfa.T) / n
+    Omega_inv_incsfa = np.diag(speeds ** -1)
+    Omega_inv_incsfa[np.isinf(Omega_inv_incsfa)] = 0
 
-    start_time = time.time()
-    mssfa_object = mssfa.MSSFA("chol", "l1")
-    W_mssfa, Omega_inv_mssfa, _, _ = mssfa_object.run(X, Md[3])
-    print(f"MSSFA finished running in {time.time()-start_time} seconds")
+    Y_incsfa_svd = np.zeros((Md[2], n))
+    for i in range(n):
+        y, _, _ = incsfa_svd_object.add_data(X[:, i], use_svd_whitening=True)
+        Y_incsfa_svd[:, i] = y.flat
+    incsfa_svd_object.converged = True
+    W_incsfa_svd = (incsfa_svd_object.standardization_node.whitening_matrix
+                    @ incsfa_svd_object.transformation_matrix)
+    Y_incsfa_svd = W_incsfa_svd.T @ X
+    Y_dot_incsfa_svd = Y_incsfa_svd[:, 1:] - Y_incsfa_svd[:, :-1]
+    speeds = np.diag(Y_dot_incsfa_svd @ Y_dot_incsfa_svd.T) / n
+    Omega_inv_incsfa_svd = np.diag(speeds ** -1)
+    Omega_inv_incsfa_svd[np.isinf(Omega_inv_incsfa_svd)] = 0
+
+    W_incmssfa, Omega_inv_incmssfa, _ = incmssfa_object.run(X, Md[3], L=2)
 
     results = []
     for name, test_data in tests:
         X_test = ((test_data - X_mean) / X_std)
         X_cont = X_test[:, fd_samples]
 
-        Y_sfa = (W_sfa.T @ X_test)
-        stats_sfa = fd.calculate_test_stats(Y_sfa, Md[0], Omega_inv_sfa)
-        conts_sfa = fd.calculate_fault_contributions(X_cont, W_sfa.T,
-                                                     Omega_inv_sfa,
-                                                     Md[0], fd_method)
+        Y_rsfa = (W_rsfa.T @ X_test)
+        stats_rsfa = fd.calculate_test_stats(Y_rsfa, Md[0], Omega_inv_rsfa)
+        conts_rsfa = fd.calculate_fault_contributions(X_cont, W_rsfa.T,
+                                                      Omega_inv_rsfa,
+                                                      Md[0], fd_method)
 
-        Y_ssfa = (W_ssfa.T @ X_test)
-        stats_ssfa = fd.calculate_test_stats(Y_ssfa, Md[1], Omega_inv_ssfa)
-        conts_ssfa = fd.calculate_fault_contributions(X_cont, W_ssfa.T,
-                                                      Omega_inv_ssfa,
-                                                      Md[1], fd_method)
+        Y_incsfa = (W_incsfa.T @ X_test)
+        stats_incsfa = fd.calculate_test_stats(Y_incsfa, Md[1],
+                                               Omega_inv_incsfa)
+        conts_incsfa = fd.calculate_fault_contributions(X_cont, W_incsfa.T,
+                                                        Omega_inv_incsfa,
+                                                        Md[1], fd_method)
 
-        stats_spca = fd.calculate_test_stats_pca(X_test.T, P, gamma_inv_d,
-                                                 gamma_inv_e, Md[2])
-        conts_spca = fd.calculate_fault_contributions_pca(X_cont.T, P,
-                                                          gamma_inv_d,
-                                                          gamma_inv_e, Md[2])
+        Y_incsfa_svd = (W_incsfa_svd.T @ X_test)
+        stats_incsfa_svd = fd.calculate_test_stats(Y_incsfa_svd, Md[2],
+                                                   Omega_inv_incsfa_svd)
+        c = fd.calculate_fault_contributions(X_cont, W_incsfa_svd.T,
+                                             Omega_inv_incsfa_svd,
+                                             Md[2], fd_method)
+        conts_incsfa_svd = c
 
-        Y_mssfa = (W_mssfa.T @ X_test)
-        stats_mssfa = fd.calculate_test_stats(Y_mssfa, Md[3], Omega_inv_mssfa)
-        conts_mssfa = fd.calculate_fault_contributions(X_cont, W_mssfa.T,
-                                                       Omega_inv_mssfa,
-                                                       Md[3], fd_method)
-        for i in range(n_test):
-            stats_ssfa[0][i] = (Y_ssfa[:Md[1], i].T
-                                @ Lambda_inv_ssfa[:Md[1], :Md[1]]
-                                @ Y_ssfa[:Md[1], i])
+        Y_incmssfa = (W_incmssfa.T @ X_test)
+        stats_incmssfa = fd.calculate_test_stats(Y_incmssfa, Md[3],
+                                                 Omega_inv_incmssfa)
+        conts_incmssfa = fd.calculate_fault_contributions(X_cont, W_incmssfa.T,
+                                                          Omega_inv_incmssfa,
+                                                          Md[3], fd_method)
 
         results.append((name,
-                        stats_sfa, conts_sfa,
-                        stats_ssfa, conts_ssfa,
-                        stats_spca, conts_spca,
-                        stats_mssfa, conts_mssfa))
+                        stats_rsfa, conts_rsfa,
+                        stats_incsfa, conts_incsfa,
+                        stats_incsfa_svd, conts_incsfa_svd,
+                        stats_incmssfa, conts_incmssfa))
 
     index_labels = [
         "XMEAS(01) A Feed  (stream 1)",
@@ -233,31 +238,24 @@ if __name__ == "__main__":
             lagged_labels.append(lbl)
     index_labels += lagged_labels
 
-    for (idv_name, stats_sfa, conts_sfa, stats_ssfa, conts_ssfa,
-         stats_spca, conts_spca, stats_mssfa, conts_mssfa) in results:
+    for (idv_name, stats_rsfa, conts_rsfa,
+         stats_incsfa, conts_incsfa,
+         stats_incsfa_svd, conts_incsfa_svd,
+         stats_incmssfa, conts_incmssfa) in results:
         """Plot Stats"""
 
-        data_to_plot = [("SFA", stats_sfa, conts_sfa),
-                        ("SSFA", stats_ssfa, conts_ssfa),
-                        ("SPCA", stats_spca, conts_spca),
-                        ("MSSFA", stats_mssfa, conts_mssfa)]
+        data_to_plot = [("RSFA", stats_rsfa, conts_rsfa),
+                        ("IncSFA", stats_incsfa, conts_incsfa),
+                        ("IncSFA SVD", stats_incsfa_svd, conts_incsfa_svd),
+                        ("IncMSSFA", stats_incmssfa, conts_incmssfa)]
         for i, (algo, stats, conts) in enumerate(data_to_plot):
             Tc, _, Sc, _ = fd.calculate_crit_values(n, Md[i], Me[i], alpha)
-            if algo == "SPCA":
-                Tc, _, Sc, _ = fd.calculate_crit_values_pca(X.T, P, n,
-                                                            Md[i], Me[i],
-                                                            alpha)
+
             _f, axs2d = plot_test_stats(algo, idv_name,
                                         stats[0], Tc,
                                         stats[2], Sc)
             axs2d[0].axvline(x=160 - lagged_samples, color='k', linestyle='--')
-            if algo == "SPCA":
-                axs2d[1].set_ylabel("SPE", fontsize=20)
-                axs2d[1].axvline(x=160 - lagged_samples, color='k',
-                                 linestyle='--')
-            else:
-                axs2d[1].axvline(x=159 - lagged_samples, color='k',
-                                 linestyle='--')
+            axs2d[1].axvline(x=159 - lagged_samples, color='k', linestyle='--')
             plt.savefig(f'plots/CS/{algo}/{algo}_{idv_name}_stats.png',
                         dpi=350)
             plt.close(fig=_f)
@@ -284,12 +282,8 @@ if __name__ == "__main__":
             indices_T = [i + lagged_samples + 1 for i in fd_samples]
             indices_T = indices_T[1:]
             T_plot = conts[0][:, 1:]
-            if algo == "SPCA":
-                indices_S = indices_T.copy()
-                S_plot = conts[2][:, 1:]
-            else:
-                indices_S = [i + lagged_samples + 2 for i in fd_samples[:-1]]
-                S_plot = conts[2]
+            indices_S = [i + lagged_samples + 2 for i in fd_samples[:-1]]
+            S_plot = conts[2]
 
             # Plot the contributions
             for index in order_T:
@@ -306,16 +300,10 @@ if __name__ == "__main__":
             ax[0, 0].set_xticks(indices_T)
             ax[0, 0].tick_params(axis='both', which='major', labelsize=15)
 
-            if algo == "SPCA":
-                ax[1, 0].set_title(f"{algo} Top {n_to_plot} SPE "
-                                   f"Contributors for {idv_name}",
-                                   fontsize=20)
-                ax[1, 0].set_ylabel('SPE Contribution', fontsize=20)
-            else:
-                ax[1, 0].set_title(f"{algo} Top {n_to_plot} $S^2$ "
-                                   f"Contributors for {idv_name}",
-                                   fontsize=20)
-                ax[1, 0].set_ylabel('$S^2$ Contribution', fontsize=20)
+            ax[1, 0].set_title(f"{algo} Top {n_to_plot} $S^2$ "
+                               f"Contributors for {idv_name}",
+                               fontsize=20)
+            ax[1, 0].set_ylabel('$S^2$ Contribution', fontsize=20)
             ax[1, 0].set_xticks(indices_S)
             ax[1, 0].tick_params(axis='both', which='major', labelsize=15)
             ax[1, 0].set_xlabel('Sample', fontsize=20)

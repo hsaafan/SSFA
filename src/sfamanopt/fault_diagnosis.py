@@ -119,10 +119,10 @@ def calculate_crit_values_pca(X: np.ndarray, P: np.ndarray,
 
 def calculate_test_stats(Y: np.ndarray,
                          Md: int,
-                         Omega_inv: np.ndarray) -> Tuple[np.ndarray,
-                                                         np.ndarray,
-                                                         np.ndarray,
-                                                         np.ndarray]:
+                         Omega_inv: np.ndarray = None) -> Tuple[np.ndarray,
+                                                                np.ndarray,
+                                                                np.ndarray,
+                                                                np.ndarray]:
     """ Calculate T^2 and S^2 test statistics for slowest and fastest features
 
     Parameters
@@ -132,7 +132,8 @@ def calculate_test_stats(Y: np.ndarray,
     Md: int
         The number of features considered to be 'slow', 1 <= Md <= m
     Omega_inv: np.ndarray
-        An [m X m] diagonal matrix containing the speeds of the features
+        An [m X m] diagonal matrix containing the speeds of the features, if
+        nothing is passed, then S^2 is not calculated
 
     Returns
     -------
@@ -156,6 +157,8 @@ def calculate_test_stats(Y: np.ndarray,
     for i in range(n_test):
         Td[i] = Y[:Md, i].T @ Y[:Md, i]
         Te[i] = Y[Md:, i].T @ Y[Md:, i]
+        if Omega_inv is None:
+            continue  # Skip calculating S^2
         if i == n_test - 1:
             # Skip final sample for S^2
             continue

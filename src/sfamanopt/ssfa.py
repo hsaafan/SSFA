@@ -115,10 +115,8 @@ class SSFA:
         converged = False
         sparsity_values = []
         relative_errors = []
-        cost_values = []
 
         W = self.convert_P_to_W(P, p_to_z)
-        cost = self.overall_cost(W)
         for k in range(max_iter):
             """Alternatively optimize P and R"""
             P = self.optimize_p(Y, P, R, p_to_z, z_to_p, X, mu)
@@ -129,10 +127,6 @@ class SSFA:
             W = self.convert_P_to_W(P, p_to_z)
 
             """Collect information about algorithm performance"""
-            prev_cost = cost
-            cost = self.overall_cost(W)
-
-            # rel_error = abs(cost - prev_cost) / abs(prev_cost)
             rel_error = (np.linalg.norm(W - W_prev) / np.linalg.norm(W_prev))
 
             """ Calculate sparsity
@@ -149,7 +143,6 @@ class SSFA:
                 s_vals += np.count_nonzero(W[:, j] <= threshold)
             sparsity_values.append(s_vals / np.size(W))
             relative_errors.append(rel_error)
-            cost_values.append(cost)
             if rel_error < err_tol:
                 if verbose:
                     print(f"Converged in {k} iterations with "
@@ -170,4 +163,4 @@ class SSFA:
             Omega_inv = np.diag(speeds[order] ** -1)
             W = W[:, order]
 
-        return(W, Omega_inv, cost_values, sparsity_values, relative_errors)
+        return(W, Omega_inv, sparsity_values, relative_errors)

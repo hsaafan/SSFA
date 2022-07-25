@@ -45,7 +45,7 @@ class MSSFA:
             max_iter: int = 500, err_tol: float = 1e-6,
             sparse_pcnt: float = 0.01,
             reorder_by_speed: bool = True,
-            verbose: bool = False):
+            verbose: bool = False) -> tuple:
         if verbose:
             print("Starting MSSFA...")
         m, n = X.shape
@@ -65,13 +65,10 @@ class MSSFA:
         cost = self.overall_cost(W)
         sparsity_values = []
         relative_errors = []
-        cost_values = []
         direction = np.ones_like(W)
         W_prev = np.zeros_like(W)
         for k in range(max_iter):
             # Get direction to move in
-            prev_direction = direction
-
             tangent = 2 * B @ W  # Derivative of cost function
             direction = -1 * tangent * eps
 
@@ -82,8 +79,6 @@ class MSSFA:
             W_prev = W
             W = self.retraction(V, A, alpha * direction)
             W = self.proximal_operator(W, eps)
-
-            cost = self.overall_cost(W)
             rel_error = (np.linalg.norm(W - W_prev) / np.linalg.norm(W_prev))
 
             """ Calculate sparsity
@@ -100,7 +95,6 @@ class MSSFA:
             # Add iteration stats to results
             sparsity_values.append(s_vals / np.size(W))
             relative_errors.append(rel_error)
-            cost_values.append(cost)
 
             # Check convergence
             if rel_error < err_tol:
@@ -115,12 +109,14 @@ class MSSFA:
         if verbose:
             print(f'Slowest Feature: {np.min(np.diag(W.T @ B @ W))}')
 
+        Y = W.T @ X
+        Y_dot = Y[:, 1:] - Y[:, :-1]
+        speeds = np.diag(Y_dot @ Y_dot.T) / n
         if reorder_by_speed:
-            Y = W.T @ X
-            Y_dot = Y[:, 1:] - Y[:, :-1]
-            speeds = np.diag(Y_dot @ Y_dot.T) / n
             order = np.argsort(speeds)
             Omega_inv = np.diag(speeds[order] ** -1)
             W = W[:, order]
+        else:
+            Omega_inv = np.diag(speeds ** -1)
 
-        return(W, Omega_inv, cost_values, sparsity_values, relative_errors)
+        return(W, Omega_inv, sparsity_values, relative_errors)

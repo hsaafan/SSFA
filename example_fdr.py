@@ -48,7 +48,7 @@ if __name__ == "__main__":
             W_ssfa = np.load(f)
             Omega_inv_ssfa = np.load(f)
     else:
-        W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md[1])
+        W_ssfa, Omega_inv_ssfa, _, _ = ssfa_object.run(X, Md[1])
     Lambda_inv_ssfa = np.linalg.pinv(W_ssfa.T @ W_ssfa)
 
     spca = SparsePCA(n_components=Md[2], max_iter=500, tol=1e-6)
@@ -63,7 +63,7 @@ if __name__ == "__main__":
     gamma_inv_e = np.linalg.inv(np.cov(scores_e.T))
 
     mssfa_object = mssfa.MSSFA("chol", "l1")
-    W_mssfa, Omega_inv_mssfa, _, _, _ = mssfa_object.run(X, Md[3])
+    W_mssfa, Omega_inv_mssfa, _, _ = mssfa_object.run(X, Md[3])
 
     results = []
     for name, test_data in tests:

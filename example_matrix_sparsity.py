@@ -11,7 +11,7 @@ import tepimport
 if __name__ == "__main__":
     load_ssfa = False
     alpha = 0.01
-    Md = [55, 55, 55, 55]
+    Md = 55
     lagged_samples = 2
     thresholds = [10 ** (-x) for x in range(13)]
     thresholds.append(0)
@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
     """Train Models"""
     sfa_object = methods.SFA()
-    W_sfa, Omega_inv_sfa = sfa_object.run(X, Md[0])
+    W_sfa, Omega_inv_sfa = sfa_object.run(X, Md)
 
     ssfa_object = ssfa.SSFA()
     if load_ssfa:
@@ -40,10 +40,10 @@ if __name__ == "__main__":
             W_ssfa = np.load(f)
             Omega_inv_ssfa = np.load(f)
     else:
-        W_ssfa, Omega_inv_ssfa, _, _, _ = ssfa_object.run(X, Md[1])
+        W_ssfa, Omega_inv_ssfa, _, _ = ssfa_object.run(X, Md)
     Lambda_inv_ssfa = np.linalg.pinv(W_ssfa.T @ W_ssfa)
 
-    spca = SparsePCA(n_components=Md[2], max_iter=500, tol=1e-6)
+    spca = SparsePCA(n_components=Md, max_iter=500, tol=1e-6)
     T = spca.fit_transform(X.T)
     P_spca = spca.components_.T
     print(f"SPCA converged in {spca.n_iter_} iterations")
@@ -51,7 +51,7 @@ if __name__ == "__main__":
     Lambda_inv_spca = np.diag(np.diag(Lambda_spca) ** -1)
 
     mssfa_object = mssfa.MSSFA("chol", "l1")
-    W_mssfa, Omega_inv_mssfa, _, _, _ = mssfa_object.run(X, Md[3])
+    W_mssfa, Omega_inv_mssfa, _, _ = mssfa_object.run(X, Md)
 
     """Sparsity Calculation"""
     sfa_sparse = np.abs(W_sfa) / np.abs(W_sfa).sum(axis=0, keepdims=1)
@@ -101,34 +101,35 @@ if __name__ == "__main__":
             lagged_labels.append(f"{lbl} (t - {i})")
     index_labels += lagged_labels
 
-    sfa_slowest = np.argsort(-1 * np.abs(sfa_sparse[:, 0]))
-    ssfa_slowest = np.argsort(-1 * np.abs(ssfa_sparse[:, 0]))
-    spca_slowest = np.argsort(-1 * np.abs(spca_sparse[:, 0]))
-    mssfa_slowest = np.argsort(-1 * np.abs(mssfa_sparse[:, 0]))
-    print("SFA")
-    for i in range(10):
-        print(f"{index_labels[sfa_slowest[i]]}, "
-              f"{sfa_sparse[:, 0][sfa_slowest[i]] * 100:.2f}")
-    remainder = 1 - np.sum(sfa_sparse[:, 0][sfa_slowest[:10]])
-    print(f"Others: {remainder * 100:.2f}")
-    print("Sparse SFA")
-    for i in range(10):
-        print(f"{index_labels[ssfa_slowest[i]]}, "
-              f"{ssfa_sparse[:, 0][ssfa_slowest[i]] * 100:.2f}")
-    remainder = 1 - np.sum(ssfa_sparse[:, 0][ssfa_slowest[:10]])
-    print(f"Others: {remainder * 100:.2f}")
-    print("Sparse PCA")
-    for i in range(10):
-        print(f"{index_labels[spca_slowest[i]]}, "
-              f"{spca_sparse[:, 0][spca_slowest[i]] * 100:.2f}")
-    remainder = 1 - np.sum(spca_sparse[:, 0][spca_slowest[:10]])
-    print(f"Others: {remainder * 100:.2f}")
-    print("Manifold Sparse SFA")
-    for i in range(10):
-        print(f"{index_labels[mssfa_slowest[i]]}, "
-              f"{mssfa_sparse[:, 0][mssfa_slowest[i]] * 100:.2f}")
-    remainder = 1 - np.sum(mssfa_sparse[:, 0][mssfa_slowest[:10]])
-    print(f"Others: {remainder * 100:.2f}")
+    for k in range(5):
+        sfa_slowest = np.argsort(-1 * np.abs(sfa_sparse[:, k]))
+        ssfa_slowest = np.argsort(-1 * np.abs(ssfa_sparse[:, k]))
+        spca_slowest = np.argsort(-1 * np.abs(spca_sparse[:, k]))
+        mssfa_slowest = np.argsort(-1 * np.abs(mssfa_sparse[:, k]))
+        print("SFA")
+        for i in range(10):
+            print(f"{index_labels[sfa_slowest[i]]}, "
+                  f"{sfa_sparse[:, k][sfa_slowest[i]] * 100:.2f}")
+        remainder = 1 - np.sum(sfa_sparse[:, k][sfa_slowest[:10]])
+        print(f"Others: {remainder * 100:.2f}")
+        print("Sparse SFA")
+        for i in range(10):
+            print(f"{index_labels[ssfa_slowest[i]]}, "
+                  f"{ssfa_sparse[:, k][ssfa_slowest[i]] * 100:.2f}")
+        remainder = 1 - np.sum(ssfa_sparse[:, k][ssfa_slowest[:10]])
+        print(f"Others: {remainder * 100:.2f}")
+        print("Sparse PCA")
+        for i in range(10):
+            print(f"{index_labels[spca_slowest[i]]}, "
+                  f"{spca_sparse[:, k][spca_slowest[i]] * 100:.2f}")
+        remainder = 1 - np.sum(spca_sparse[:, k][spca_slowest[:10]])
+        print(f"Others: {remainder * 100:.2f}")
+        print("Manifold Sparse SFA")
+        for i in range(10):
+            print(f"{index_labels[mssfa_slowest[i]]}, "
+                  f"{mssfa_sparse[:, k][mssfa_slowest[i]] * 100:.2f}")
+        remainder = 1 - np.sum(mssfa_sparse[:, k][mssfa_slowest[:10]])
+        print(f"Others: {remainder * 100:.2f}")
 
     """Sparsity Plot"""
     for threshold in thresholds:
@@ -173,12 +174,8 @@ if __name__ == "__main__":
 
         if threshold == 0:
             magnitude = 0
-            text = f'J = {Md} | Threshold = 0'
-            # _f_sparse.text(0.2, 0.95, text, fontsize=24)
         else:
             magnitude = int(np.abs(np.floor(np.log10(threshold))))
-            text = f'J = {Md} | Threshold = 1e-{magnitude}'
-            # _f_sparse.text(0.2, 0.95, text, fontsize=24)
 
         plt.savefig(f"plots/Sparsity/Sparsity_comparison_{magnitude}.png",
                     dpi=350)
